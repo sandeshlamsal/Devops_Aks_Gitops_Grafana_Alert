@@ -157,32 +157,74 @@ uid: prometheusdatasource      # referenced by every panel — keep stable
 Add another datasource (Loki, a second Prometheus, …) by adding another
 `GrafanaDatasource` CR with the same `instanceSelector`.
 
-### Exposing Grafana
+### Exposing Grafana — how the permanent URL works
 
-`grafana-service` is `ClusterIP`. Options to give the team a URL:
-
-```bash
-# quick, local
-kubectl port-forward -n monitoring svc/grafana-service 3000:3000
-```
-
-For a shared URL, add to `grafana.yaml`:
+`grafana.yaml` makes `grafana-service` a public `LoadBalancer` with a stable Azure
+hostname, on port 80:
 
 ```yaml
 spec:
+  config:
+    server:
+      domain: "nginx-demo-grafana.eastus2.cloudapp.azure.com"
+      root_url: "http://nginx-demo-grafana.eastus2.cloudapp.azure.com/"
   service:
+    metadata:
+      annotations:
+        service.beta.kubernetes.io/azure-dns-label-name: "nginx-demo-grafana"
     spec:
-      type: LoadBalancer        # or keep ClusterIP and add spec.ingress below
-  # ingress:
-  #   spec:
-  #     ingressClassName: nginx
-  #     rules:
-  #       - host: grafana.example.com
-  #         http: { paths: [{ path: /, pathType: Prefix, backend: { service: { name: grafana-service, port: { number: 3000 } } } }] }
+      type: LoadBalancer
+      ports:
+        - { name: grafana-http, port: 80, targetPort: 3000, protocol: TCP }
 ```
 
-⚠️ A public `LoadBalancer` with `admin/changeme123` is wide open — change the password
-and/or put auth in front first.
+- The `azure-dns-label-name` annotation makes Azure publish
+  `nginx-demo-grafana.<region>.cloudapp.azure.com` and pin it to the LB's public IP —
+  the URL stays valid even if the Service is recreated.
+- `port: 80 → targetPort: 3000` keeps `:3000` out of the URL.
+- `server.domain` / `root_url` make Grafana emit correct redirect/share links.
+
+Change the label (must be unique per region) + both `server` values together, commit,
+push, reconcile.
+
+**No exposure wanted?** Drop the `service` block (back to the operator default
+`ClusterIP:3000`) and use `kubectl port-forward -n monitoring svc/grafana-service 3000:3000`.
+
+⚠️ A public `LoadBalancer` on HTTP with `admin/changeme123` is wide open. For real use:
+Secret-backed `admin_password` (see above), and put TLS in front — ClusterIP + an
+`Ingress` under `spec.ingress` + ingress-nginx + cert-manager, then
+`root_url: https://grafana.yourco.com/`. See the repo root README §4–§5.
+
+### Persistence — the PVC
+
+Grafana stores its state (dashboards, prefs) in an in-pod SQLite DB. Any change to
+`grafana.yaml` rolls the pod, which would wipe it. `grafana.yaml` gives it a disk:
+
+```yaml
+spec:
+  persistentVolumeClaim:
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources: { requests: { storage: 2Gi } }
+  deployment:
+    spec:
+      template:
+        spec:
+          securityContext: { runAsUser: 472, runAsGroup: 472, fsGroup: 472 }
+          volumes:
+            - name: grafana-data
+              persistentVolumeClaim: { claimName: grafana-pvc }
+```
+
+- The operator creates PVC `grafana-pvc` but does **not** auto-mount it in v5 — the
+  `volumes` override repoints the operator's `grafana-data` volume (mounted at
+  `/var/lib/grafana`) at the PVC.
+- `fsGroup: 472` is required — the Grafana image runs as uid/gid 472 and an Azure
+  managed-disk PV mounts root-owned, so without it Grafana `CrashLoopBackOff`s on
+  "GF_PATHS_DATA is not writable".
+
+State now survives pod restarts. Dashboards/datasource/folders are still declared in git
+— the operator re-pushes them each `resyncPeriod`, and UI edits are overwritten.
 
 ---
 
