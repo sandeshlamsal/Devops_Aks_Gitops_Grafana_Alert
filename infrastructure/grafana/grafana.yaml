@@ -24,6 +24,17 @@ spec:
     # front it with auth, or switch back to ClusterIP + an Ingress.
     spec:
       type: LoadBalancer
+  persistentVolumeClaim:
+    # Grafana's default DB is SQLite inside the pod — wiped on every pod restart
+    # (e.g. any config change), leaving dashboards missing until the operator's next
+    # resync. A PVC keeps Grafana state across restarts. Uses the cluster default
+    # StorageClass (Azure managed disk).
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 2Gi
 ---
 apiVersion: grafana.integreatly.org/v1beta1
 kind: GrafanaDatasource
