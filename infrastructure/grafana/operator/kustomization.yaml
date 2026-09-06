@@ -1,0 +1,7 @@
+# Applied by the Flux Kustomization "grafana-operator" (clusters/dev/grafana-operator.yaml).
+# This is its own Kustomization so its CRDs are installed BEFORE the Grafana / dashboard
+# CRs in the parent folder — the "grafana" Kustomization dependsOn this one.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - grafana-operator.yaml

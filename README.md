@@ -16,20 +16,24 @@ infrastructure/
   prometheus/               BACKEND       — reconciled by clusters/dev/prometheus.yaml
     namespace.yaml          the monitoring namespace
     kube-prometheus-stack.yaml   Prometheus + Prometheus Operator + Alertmanager
-  grafana/                  VIEW METRICS  — reconciled by clusters/dev/grafana.yaml
-    grafana-operator.yaml   Grafana Operator install
-    grafana.yaml            Grafana instance + Prometheus datasource
-    json/nginx-demo.json    dashboard model (plain JSON)
-    dashboard.yaml          GrafanaDashboard CR → ConfigMap from json/
+  grafana/                  VIEW METRICS
+    operator/               Grafana Operator install — reconciled by clusters/dev/grafana-operator.yaml
+    grafana.yaml            Grafana instance + Prometheus datasource   \
+    json/nginx-demo.json    dashboard model (plain JSON)                > reconciled by clusters/dev/grafana.yaml
+    dashboard.yaml          GrafanaDashboard CR → ConfigMap from json/ /
   alert/                    ALERTING      — reconciled by clusters/dev/alert.yaml
     alertmanager-config.yaml  AlertmanagerConfig — routing + email receiver
     rules/nginx-restarts.yaml PrometheusRule — NginxPodRestarting
 
-clusters/dev/              the Flux Kustomizations (apps, prometheus, grafana, alert)
+clusters/dev/              the Flux Kustomizations (apps, prometheus, grafana-operator, grafana, alert)
 docker/                    Dockerfile + static site + nginx config (stub_status on)
 ```
 
 Each `infrastructure/` folder has its own README with the details.
+
+Flux apply order: `prometheus` → `grafana-operator` → `grafana`; `alert` also waits on
+`prometheus`. Splitting the operator into its own Kustomization is what lets its CRDs
+register before the `Grafana` / `GrafanaDashboard` CRs are applied.
 
 ## How it fits together
 
@@ -90,10 +94,11 @@ az k8s-configuration flux create \
   --namespace flux-system \
   --url https://github.com/sandeshlamsal/Devops_Aks_Gitops_Grafana_Alert \
   --branch main \
-  --kustomization name=apps       path=./apps/nginx-demo/overlays/dev prune=true \
-  --kustomization name=prometheus path=./infrastructure/prometheus    prune=true \
-  --kustomization name=grafana    path=./infrastructure/grafana        prune=true dependsOn=["prometheus"] \
-  --kustomization name=alert      path=./infrastructure/alert          prune=true dependsOn=["prometheus"]
+  --kustomization name=apps            path=./apps/nginx-demo/overlays/dev prune=true \
+  --kustomization name=prometheus      path=./infrastructure/prometheus    prune=true \
+  --kustomization name=grafana-operator path=./infrastructure/grafana/operator prune=true dependsOn=["prometheus"] \
+  --kustomization name=grafana         path=./infrastructure/grafana       prune=true dependsOn=["grafana-operator"] \
+  --kustomization name=alert           path=./infrastructure/alert         prune=true dependsOn=["prometheus"]
 ```
 
 ## Verify

@@ -1,5 +1,7 @@
 # Applied by the Flux Kustomization "grafana" (clusters/dev/grafana.yaml), which
-# dependsOn "prometheus" (the namespace + Prometheus datasource target).
+# dependsOn "grafana-operator" (its CRDs must exist first) and, through that,
+# "prometheus". The operator install itself is in operator/ — a separate Kustomization,
+# NOT referenced here.
 #
 # configMapGenerator turns every file in json/ into the `grafana-dashboards` ConfigMap
 # (one key per file). disableNameSuffixHash keeps the name stable so dashboard.yaml
@@ -8,7 +10,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - grafana-operator.yaml
   - grafana.yaml
   - dashboard.yaml
 configMapGenerator:

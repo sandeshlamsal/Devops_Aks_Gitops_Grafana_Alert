@@ -1,17 +1,17 @@
 # infrastructure/grafana — view nginx pod metrics
 
 Grafana, the operator way: Flux applies these CRs, the Grafana Operator turns them into
-a running Grafana. Reconciled by `clusters/dev/grafana.yaml` (dependsOn `prometheus`).
+a running Grafana. Reconciled by `clusters/dev/grafana.yaml` (dependsOn `grafana-operator`).
 
 The `monitoring` namespace and Prometheus itself live in `../prometheus/`.
 
-| File | What it does |
+| Path | What it does |
 |------|--------------|
-| `grafana-operator.yaml` | Installs the Grafana Operator (dashboards only). |
+| `operator/grafana-operator.yaml` | Installs the Grafana Operator + its CRDs. **Separate Flux Kustomization** (`clusters/dev/grafana-operator.yaml`) so the CRDs land before the CRs below — `grafana` dependsOn it. |
 | `grafana.yaml` | The Grafana instance (`grafana-service:3000`) + its Prometheus datasource. |
 | `json/nginx-demo.json` | The dashboard model — plain Grafana JSON, editable on its own. |
 | `dashboard.yaml` | `GrafanaDashboard` CR that points at the ConfigMap key (no inline JSON). |
-| `kustomization.yaml` | Bundles `json/*.json` into the `grafana-dashboards` ConfigMap. |
+| `kustomization.yaml` | Bundles `json/*.json` into the `grafana-dashboards` ConfigMap (does **not** include `operator/`). |
 
 ## See it
 
