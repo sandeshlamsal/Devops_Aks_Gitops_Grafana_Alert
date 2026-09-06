@@ -17,13 +17,25 @@ spec:
       admin_user: admin
       admin_password: changeme123      # DEMO ONLY — the service below is a public LoadBalancer
     server:
-      root_url: "%(protocol)s://%(domain)s/"
+      # Permanent shareable URL. The Azure DNS label on the Service (below) publishes
+      # <label>.<region>.cloudapp.azure.com and keeps it pinned to the LB's public IP
+      # even if the Service is recreated.
+      domain: "nginx-demo-grafana.eastus2.cloudapp.azure.com"
+      root_url: "http://nginx-demo-grafana.eastus2.cloudapp.azure.com/"
   service:
-    # Exposes Grafana on a public IP so the team can reach it without port-forward.
-    # For anything real: change admin_password (use $__env{...} + a Secret) and/or
-    # front it with auth, or switch back to ClusterIP + an Ingress.
+    # Public LoadBalancer with a stable Azure-managed hostname, listening on :80 so the
+    # URL has no port suffix. For anything real: Secret-backed admin_password, and put
+    # TLS/auth in front (ClusterIP + Ingress + cert-manager) — see the folder README.
+    metadata:
+      annotations:
+        service.beta.kubernetes.io/azure-dns-label-name: "nginx-demo-grafana"
     spec:
       type: LoadBalancer
+      ports:
+        - name: grafana-http
+          protocol: TCP
+          port: 80
+          targetPort: 3000
 ---
 apiVersion: grafana.integreatly.org/v1beta1
 kind: GrafanaDatasource
