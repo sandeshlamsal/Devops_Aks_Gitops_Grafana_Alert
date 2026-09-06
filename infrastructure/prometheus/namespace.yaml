@@ -1,0 +1,7 @@
+# The namespace every monitoring component runs in (Prometheus, Alertmanager, Grafana,
+# the Grafana Operator, and all their CRs). Created here because prometheus/ is the
+# first thing Flux applies.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring

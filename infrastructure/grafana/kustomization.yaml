@@ -1,0 +1,20 @@
+# Applied by the Flux Kustomization "grafana" (clusters/dev/grafana.yaml), which
+# dependsOn "prometheus" (the namespace + Prometheus datasource target).
+#
+# configMapGenerator turns every file in json/ into the `grafana-dashboards` ConfigMap
+# (one key per file). disableNameSuffixHash keeps the name stable so dashboard.yaml
+# can reference it. Add a dashboard: drop json/<name>.json, list it under files:, and
+# add a GrafanaDashboard block in dashboard.yaml with key: <name>.json.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - grafana-operator.yaml
+  - grafana.yaml
+  - dashboard.yaml
+configMapGenerator:
+  - name: grafana-dashboards
+    namespace: monitoring
+    files:
+      - json/nginx-demo.json
+generatorOptions:
+  disableNameSuffixHash: true

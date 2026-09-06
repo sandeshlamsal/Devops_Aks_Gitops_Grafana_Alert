@@ -1,3 +1,6 @@
+# Routing + email receiver for the alerts in rules/. An AlertmanagerConfig CR: the
+# Prometheus Operator merges it into Alertmanager's config. The Gmail app password is
+# read from the gmail-smtp-secret Secret (create it by hand — see the repo root README).
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig
 metadata:
@@ -5,13 +8,13 @@ metadata:
   namespace: monitoring
 spec:
   route:
-    receiver: "email-notifications"
+    receiver: "email"
     groupBy: ["alertname", "namespace"]
     groupWait: 30s
     groupInterval: 5m
     repeatInterval: 1h
   receivers:
-    - name: "email-notifications"
+    - name: "email"
       emailConfigs:
         - to: "parasisandesh@hotmail.com"
           from: "sunwalsandesh@gmail.com"

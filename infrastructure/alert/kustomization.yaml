@@ -1,0 +1,11 @@
+# Applied by the Flux Kustomization "alert" (clusters/dev/alert.yaml), which dependsOn
+# "prometheus" (Prometheus + Alertmanager + their CRDs must exist first).
+#
+# alertmanager-config.yaml = routing + email receiver (shared by every rule)
+# rules/*.yaml              = the alert rules (PrometheusRule). Add one: cp an existing
+#                            file in rules/, edit it, then list it below.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - alertmanager-config.yaml
+  - rules/nginx-restarts.yaml

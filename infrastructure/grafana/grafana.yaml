@@ -1,0 +1,35 @@
+# The Grafana instance + its Prometheus datasource, as CRs.
+# The operator builds the Deployment and Service (grafana-service:3000) from this.
+# Grafana is used for dashboards only — alerting/email is Prometheus + Alertmanager
+# (see ../alert/), so there is no SMTP config here.
+# The label dashboards: "grafana" is what dashboard.yaml selects on.
+---
+apiVersion: grafana.integreatly.org/v1beta1
+kind: Grafana
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    dashboards: "grafana"
+spec:
+  config:
+    security:
+      admin_user: admin
+      admin_password: changeme123
+---
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: "grafana"
+  datasource:
+    name: Prometheus
+    uid: prometheusdatasource
+    type: prometheus
+    access: proxy
+    url: http://kube-prom-stack-kube-prome-prometheus.monitoring.svc:9090
+    isDefault: true

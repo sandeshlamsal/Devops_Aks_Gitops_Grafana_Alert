@@ -1,0 +1,56 @@
+# Installs kube-prometheus-stack via Flux: Prometheus + the Prometheus Operator +
+# Alertmanager + node-exporter + kube-state-metrics. This is the backend everything
+# else builds on:
+#   - ../grafana/  queries Prometheus as a datasource and draws dashboards
+#   - ../alert/    adds PrometheusRule + AlertmanagerConfig CRs
+# The chart's built-in Grafana is turned off — dashboards come from the Grafana Operator.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: prometheus-community
+  namespace: monitoring
+spec:
+  interval: 1h
+  url: https://prometheus-community.github.io/helm-charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-prom-stack
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      version: ">=60.0.0 <61.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: monitoring
+  values:
+    grafana:
+      enabled: false
+    alertmanager:
+      alertmanagerSpec:
+        # pick up AlertmanagerConfig CRs from any namespace, and make the CR's route
+        # the real root route (no auto-injected namespace matcher)
+        alertmanagerConfigSelector: {}
+        alertmanagerConfigNamespaceSelector: {}
+        alertmanagerConfigMatcherStrategy:
+          type: None
+      config:
+        route:
+          receiver: "null"
+        receivers:
+          - name: "null"
+    prometheus:
+      prometheusSpec:
+        retention: 5d
+        # {} = discover ServiceMonitors / PrometheusRules in any namespace,
+        # not just the chart's own labelled ones
+        serviceMonitorSelector: {}
+        serviceMonitorNamespaceSelector: {}
+        ruleSelector: {}
+        ruleNamespaceSelector: {}

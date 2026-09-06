@@ -1,3 +1,4 @@
+# Tells the Prometheus Operator to scrape the nginx-demo exporter every 15s.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

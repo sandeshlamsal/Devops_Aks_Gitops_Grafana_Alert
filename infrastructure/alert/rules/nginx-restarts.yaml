@@ -1,0 +1,23 @@
+# Alert: NginxPodRestarting — fires when an nginx-demo pod restarts.
+# A PrometheusRule CR: the Prometheus Operator loads it into Prometheus, which
+# evaluates the expr and forwards firing alerts to Alertmanager. Routing to email is
+# in ../alertmanager-config.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: nginx-restarts
+  namespace: monitoring
+  labels:
+    release: kube-prom-stack
+spec:
+  groups:
+    - name: nginx-demo
+      rules:
+        - alert: NginxPodRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="default", pod=~"nginx-demo.*"}[5m]) > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "nginx-demo pod restarted"
+            description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} restarted {{ $value }} time(s) in the last 5 minutes."

@@ -1,3 +1,5 @@
+# Exposes nginx (port 80) and the exporter metrics (port 9113). The ServiceMonitor
+# scrapes the metrics port.
 apiVersion: v1
 kind: Service
 metadata:

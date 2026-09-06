@@ -1,3 +1,5 @@
+# nginx-demo Deployment: nginx + an nginx-prometheus-exporter sidecar that turns
+# nginx stub_status into Prometheus metrics on :9113.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

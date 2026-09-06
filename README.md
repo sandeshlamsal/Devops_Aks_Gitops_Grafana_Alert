@@ -1,94 +1,74 @@
-# AKS GitOps Demo — nginx + kube-prometheus-stack via Flux (Operator Model)
+# AKS GitOps Demo — nginx + Grafana + Prometheus alerting, all via Flux
 
-Nginx app deployed to AKS via Flux + Kustomize, with Prometheus/Grafana/Alertmanager
-installed as a Flux-managed Helm release. Alerting follows the **Kubernetes Operator
-pattern** end to end — no Azure-native monitoring (Azure Monitor / Managed Prometheus /
-Azure Managed Grafana) is used anywhere in this repo. All scrape targets and alert
-routing are declared as Kubernetes custom resources (`ServiceMonitor`, `PrometheusRule`,
-`AlertmanagerConfig`) that the Prometheus Operator (bundled in kube-prometheus-stack)
-reconciles automatically.
+An nginx app on **AKS**, deployed by **Flux + Kustomize**. Metrics with Prometheus,
+dashboards with the **Grafana Operator**, alerting with **Prometheus + Alertmanager** —
+everything declared as Kubernetes custom resources in git, nothing clicked in a UI, no
+Azure-native monitoring.
 
-## Structure
+## Layout
 
 ```
-docker/                              Dockerfile, static site, nginx config (stub_status enabled)
-apps/nginx-demo/base/
-  deployment.yaml                    nginx + nginx-prometheus-exporter sidecar
-  service.yaml                       exposes both the app port and the metrics port
-  servicemonitor.yaml                tells Prometheus Operator to scrape the exporter
-apps/nginx-demo/overlays/dev/        Dev overlay (replica count patch)
-infrastructure/monitoring/
-  helmrepository.yaml, helmrelease.yaml   kube-prometheus-stack, cross-namespace CRD discovery enabled
-  alerts/                            one PrometheusRule file per alert — see "Adding a new alert" below
-    nginx-restarts.yaml
-    nginx-availability.yaml
-    nginx-metrics-down.yaml
-    _TEMPLATE.yaml                   copy-paste starting point, not applied
-    kustomization.yaml
-  alertmanagerconfig.yaml            AlertmanagerConfig — routing + email receiver (operator-native)
-clusters/dev/                        Flux Kustomization CRDs (what Flux reconciles)
+apps/nginx-demo/            the nginx app (deployment + service + ServiceMonitor)
+  base/                     base manifests
+  overlays/dev/             dev overlay (replica count)
+
+infrastructure/
+  prometheus/               BACKEND       — reconciled by clusters/dev/prometheus.yaml
+    namespace.yaml          the monitoring namespace
+    kube-prometheus-stack.yaml   Prometheus + Prometheus Operator + Alertmanager
+  grafana/                  VIEW METRICS  — reconciled by clusters/dev/grafana.yaml
+    grafana-operator.yaml   Grafana Operator install
+    grafana.yaml            Grafana instance + Prometheus datasource
+    json/nginx-demo.json    dashboard model (plain JSON)
+    dashboard.yaml          GrafanaDashboard CR → ConfigMap from json/
+  alert/                    ALERTING      — reconciled by clusters/dev/alert.yaml
+    alertmanager-config.yaml  AlertmanagerConfig — routing + email receiver
+    rules/nginx-restarts.yaml PrometheusRule — NginxPodRestarting
+
+clusters/dev/              the Flux Kustomizations (apps, prometheus, grafana, alert)
+docker/                    Dockerfile + static site + nginx config (stub_status on)
 ```
 
-## Operator-model architecture
+Each `infrastructure/` folder has its own README with the details.
+
+## How it fits together
 
 ```
-nginx-demo pod (2 containers: nginx + nginx-prometheus-exporter)
-      │ exposes :9113/metrics
-      ▼
-ServiceMonitor (apps/nginx-demo/base/servicemonitor.yaml)
-      │ Prometheus Operator auto-discovers via label selector, no manual scrape config
-      ▼
-Prometheus (scrapes metrics, evaluates PrometheusRule)
-      │
-PrometheusRule (infrastructure/monitoring/alerts/*.yaml — one file per alert)
-      │ fires alerts: NginxPodRestarting, NginxPodNotReady, NginxExporterTargetDown
-      ▼
-Alertmanager ← AlertmanagerConfig (infrastructure/monitoring/alertmanagerconfig.yaml)
-      │ routing + receiver defined as a CR, not embedded in Helm values
-      ▼
-Email (Gmail SMTP, password via a Kubernetes Secret referenced directly — no file mounts)
+nginx-demo pods ──/metrics──▶ Prometheus ──────────datasource──────────▶ Grafana
+                                   │                                        dashboards
+                                   │ evaluates alert/rules/nginx-restarts.yaml (PrometheusRule)
+                                   ▼
+                              Alertmanager ◀── alert/alertmanager-config.yaml (AlertmanagerConfig)
+                                   │ NginxPodRestarting fires
+                                   ▼
+                    email (Gmail SMTP) → parasisandesh@hotmail.com
 ```
 
-Two Helm values enable this pattern (in `helmrelease.yaml`):
-- `prometheus.prometheusSpec.serviceMonitorSelector: {}` / `serviceMonitorNamespaceSelector: {}`
-  — without these, Prometheus only picks up `ServiceMonitor`s matching the chart's own
-  restrictive default labels, in its own namespace only.
-- `alertmanager.alertmanagerSpec.alertmanagerConfigSelector: {}` / `alertmanagerConfigNamespaceSelector: {}`
-  / `alertmanagerConfigMatcherStrategy.type: None` — the last one is important: without it,
-  Prometheus Operator auto-injects a `namespace=<AlertmanagerConfig's own namespace>` matcher
-  onto every `AlertmanagerConfig`'s route, which silently breaks routing if your alerts carry
-  a different `namespace` label (e.g. alerts about pods in `default` but the `AlertmanagerConfig`
-  object lives in `monitoring`). `type: None` makes the CR's route the actual root route,
-  ignoring that auto-matcher entirely.
+Flux applies four Kustomizations: `apps` and `prometheus`, then `grafana` and `alert`
+(both `dependsOn: prometheus`).
 
 ## Before you push
 
-1. Image path is already set to `sanaksregistry.azurecr.io/nginx-demo:v1` in
-   `apps/nginx-demo/base/deployment.yaml`. Rebuild and push the image (it now bakes in
-   `default.conf` with `stub_status` enabled — required for the exporter sidecar to work).
-2. Create the Gmail SMTP secret directly on the cluster (never commit it to git):
+1. **Image** — build and push the nginx image (bakes in `default.conf` with `stub_status`
+   enabled):
    ```bash
+   cd docker
+   docker build -t nginx-demo:v1 .
+   az acr login --name sanaksregistry
+   docker tag nginx-demo:v1 sanaksregistry.azurecr.io/nginx-demo:v1
+   docker push sanaksregistry.azurecr.io/nginx-demo:v1
+   az aks update --resource-group san-rg --name san-dev-aks --attach-acr sanaksregistry
+   ```
+2. **Gmail SMTP secret** — Alertmanager reads it to send alert email. Never commit it:
+   ```bash
+   kubectl create namespace monitoring   # if it doesn't exist yet
    kubectl create secret generic gmail-smtp-secret \
      --namespace monitoring \
      --from-literal=password='YOUR_GMAIL_APP_PASSWORD'
    ```
-   `alertmanagerconfig.yaml` references this secret directly via `authPassword.name`/`key`
-   — no file mount, no `alertmanager.alertmanagerSpec.secrets` list needed. This is the
-   operator-native way of doing it: the Operator reads the Secret via the Kubernetes API
-   when reconciling the `AlertmanagerConfig`, rather than the raw-config approach of
-   mounting a file into the pod.
-3. Change `grafana.adminPassword` in `helmrelease.yaml` to something real, or switch to a Secret.
-
-## Build and push the image
-
-```bash
-cd docker
-docker build -t nginx-demo:v1 .
-az acr login --name sanaksregistry
-docker tag nginx-demo:v1 sanaksregistry.azurecr.io/nginx-demo:v1
-docker push sanaksregistry.azurecr.io/nginx-demo:v1
-az aks update --resource-group san-rg --name san-dev-aks --attach-acr sanaksregistry
-```
+   Referenced by `infrastructure/alert/alertmanager-config.yaml` via `authPassword`.
+3. **Grafana admin password** — change `admin_password` in
+   `infrastructure/grafana/grafana.yaml`.
 
 ## Enable Flux on AKS and point it at this repo
 
@@ -110,116 +90,45 @@ az k8s-configuration flux create \
   --namespace flux-system \
   --url https://github.com/sandeshlamsal/Devops_Aks_Gitops_Grafana_Alert \
   --branch main \
-  --kustomization name=apps path=./apps/nginx-demo/overlays/dev prune=true \
-  --kustomization name=infrastructure path=./infrastructure/monitoring prune=true
+  --kustomization name=apps       path=./apps/nginx-demo/overlays/dev prune=true \
+  --kustomization name=prometheus path=./infrastructure/prometheus    prune=true \
+  --kustomization name=grafana    path=./infrastructure/grafana        prune=true dependsOn=["prometheus"] \
+  --kustomization name=alert      path=./infrastructure/alert          prune=true dependsOn=["prometheus"]
 ```
 
 ## Verify
 
 ```bash
-kubectl get gitrepository -n flux-system
 kubectl get kustomization -n flux-system
-kubectl get pods -n default              # should show 2/2 (nginx + exporter) per pod
-kubectl get pods -n monitoring
-kubectl get servicemonitor -n default
-kubectl get prometheusrule -n monitoring
-kubectl get alertmanagerconfig -n monitoring
-kubectl get svc nginx-demo-svc --watch
+kubectl get pods -n default                     # nginx-demo, 2/2 per pod
+kubectl get pods -n monitoring                  # prometheus, alertmanager, grafana, grafana-operator
+kubectl get grafana,grafanadashboard -n monitoring
+kubectl get prometheusrule,alertmanagerconfig -n monitoring
 ```
 
 ## Access Grafana
 
 ```bash
-kubectl port-forward -n monitoring svc/kube-prom-stack-grafana 3000:80
+kubectl port-forward -n monitoring svc/grafana-service 3000:3000
 ```
-Visit http://localhost:3000 (user: `admin`, password: value of `grafana.adminPassword`).
+http://localhost:3000 — `admin` / `admin_password` from `infrastructure/grafana/grafana.yaml`.
+Dashboard: **nginx-demo pods** (CPU / memory / restarts per pod).
 
-## Confirm the ServiceMonitor is actually being scraped
+## Test the alert
 
 ```bash
-kubectl port-forward -n monitoring svc/kube-prom-stack-kube-prome-prometheus 9090:9090
-```
-Visit http://localhost:9090/targets and look for a `nginx-demo` job — it should show
-`UP` for each pod. If it's missing entirely, check that `prometheus.prometheusSpec.serviceMonitorNamespaceSelector`
-is set to `{}` (see architecture note above) and that the `ServiceMonitor`'s label
-selector (`app: nginx-demo`) matches the Service's labels.
-
-## Alert rules
-
-Each alert lives in its own file under `infrastructure/monitoring/alerts/` — this keeps
-rules independently reviewable and easy to add without touching unrelated alerts:
-
-- **`nginx-restarts.yaml`** — **NginxPodRestarting** fires if any `nginx-demo` pod's
-  container restart count increases within a 5-minute window.
-- **`nginx-availability.yaml`** — **NginxPodNotReady** fires if fewer than 2 `nginx-demo`
-  pods are Ready for 2+ minutes.
-- **`nginx-metrics-down.yaml`** — **NginxExporterTargetDown** fires if Prometheus can't
-  scrape the exporter sidecar at all (`up{job="nginx-demo"} == 0`) — this one specifically
-  exercises the `ServiceMonitor`.
-
-All three route through `infrastructure/monitoring/alertmanagerconfig.yaml`'s
-`email-notifications` receiver → `parasisandesh@hotmail.com`, sent via Gmail SMTP.
-Every `PrometheusRule` needs the label `release: kube-prom-stack` — required for the
-chart's default rule selector to pick it up.
-
-### Adding a new alert
-
-1. Copy the template: `cp infrastructure/monitoring/alerts/_TEMPLATE.yaml infrastructure/monitoring/alerts/<your-alert-name>.yaml`
-2. Fill in the placeholders (alert name, PromQL expression, duration, severity, summary/description).
-   The template includes example expressions for high CPU, high memory, and replica-count checks.
-3. Add the new filename to `infrastructure/monitoring/alerts/kustomization.yaml`'s `resources:` list.
-   **This step is easy to forget** — a file that exists and is committed but isn't listed
-   here is silently never applied. See the Troubleshooting table in the team reference doc.
-4. Commit and push. No `kubectl apply` — git is the source of truth.
-5. Verify: `kubectl get prometheusrule -n monitoring` should list your new rule's `metadata.name`.
-
-No changes to `alertmanagerconfig.yaml` are needed for a new alert unless it should route
-to a different receiver (e.g. a different team's Slack channel) — by default every alert
-routes through the same `email-notifications` receiver.
-
-`email-notifications` receiver → `parasisandesh@hotmail.com`, sent via Gmail SMTP.
-Every `PrometheusRule` needs the label `release: kube-prom-stack` — required for the
-chart's default rule selector to pick it up.
-
-### Test NginxPodRestarting (GitOps-driven)
-
-```bash
-kubectl exec -n default deploy/nginx-demo -- sh -c "kill 1"
-kubectl get pods -n default -w
-```
-This kills the main nginx process inside one pod (`RESTARTS` goes from 0 to 1).
-
-Or test via git: temporarily reduce `initialDelaySeconds`/`periodSeconds` on the
-readiness/liveness probes in `apps/nginx-demo/base/deployment.yaml`, commit, push —
-an overly aggressive probe causes Kubernetes to restart the container once Flux applies it.
-
-### Test NginxExporterTargetDown
-
-```bash
-kubectl exec -n default deploy/nginx-demo -c nginx-exporter -- kill 1
-```
-Kills just the exporter sidecar without touching nginx itself — Prometheus should
-mark the target `down` within one scrape interval (15s) and fire after 2 minutes.
-
-### Check it fired
-
-```bash
+kubectl exec -n default deploy/nginx-demo -- sh -c "kill 1"     # restarts one pod
 kubectl port-forward -n monitoring svc/kube-prom-stack-kube-prome-alertmanager 9093:9093
 ```
-Visit http://localhost:9093 — the alert should appear as `Pending` then `Firing`
-within 1-2 minutes, and an email should land at `parasisandesh@hotmail.com` shortly after.
-If nothing arrives, check Alertmanager's logs for the exact SMTP error:
+`NginxPodRestarting` shows Pending → Firing at http://localhost:9093 within ~1–2 minutes,
+then an email is sent. If none arrives:
 ```bash
 kubectl logs -n monitoring alertmanager-kube-prom-stack-kube-prome-alertmanager-0 -c alertmanager --tail=50
 ```
 
-## Why Gmail instead of the recipient's own Outlook/Hotmail account as sender
+## Why Gmail as the sender
 
-Microsoft has disabled basic SMTP authentication for personal Outlook.com/Hotmail
-consumer accounts — attempts fail with `535 5.7.139 Authentication unsuccessful,
-basic authentication is disabled`, and there's no user-facing toggle to re-enable it
-(only Microsoft 365 work/school tenants can, via the Exchange Admin Center). Gmail
-still supports app-password SMTP auth for personal accounts with 2-Step Verification
-enabled, so it's used as the sender while `parasisandesh@hotmail.com` remains the
-recipient (receiving mail is unaffected by any of this).
-
+Microsoft disabled basic SMTP auth for personal Outlook.com/Hotmail accounts
+(`535 5.7.139 ... basic authentication is disabled`), with no user toggle to re-enable it.
+Gmail still allows app-password SMTP for accounts with 2-Step Verification, so it sends
+while `parasisandesh@hotmail.com` just receives.
