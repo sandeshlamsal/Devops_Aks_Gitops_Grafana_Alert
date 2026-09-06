@@ -36,6 +36,16 @@ spec:
           protocol: TCP
           port: 80
           targetPort: 3000
+  persistentVolumeClaim:
+    # A team-shared instance shouldn't lose its dashboards/datasource for a minute
+    # every time grafana.yaml changes (config change → pod roll → fresh in-pod SQLite).
+    # The operator mounts this PVC at /var/lib/grafana so state survives restarts.
+    # Uses the cluster default StorageClass (Azure managed disk).
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 2Gi
 ---
 apiVersion: grafana.integreatly.org/v1beta1
 kind: GrafanaDatasource
