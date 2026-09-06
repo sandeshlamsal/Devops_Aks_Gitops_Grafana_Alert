@@ -1,0 +1,7 @@
+# QA overlay patch: 1 replica (smaller than dev).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-demo
+spec:
+  replicas: 1

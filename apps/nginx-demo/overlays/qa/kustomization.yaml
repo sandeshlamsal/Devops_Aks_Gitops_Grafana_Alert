@@ -1,0 +1,12 @@
+# QA overlay: the same base as dev, pinned to the nginx-qa-app-ns namespace with 1
+# replica. Flux's "apps-qa" Kustomization points here. No infrastructure change is
+# needed for QA — Prometheus auto-discovers the ServiceMonitor, the NginxPodRestarting
+# rule is namespace-agnostic, and the Grafana dashboard's Namespace variable picks it up.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: nginx-qa-app-ns
+resources:
+  - namespace.yaml
+  - ../../base
+patches:
+  - path: replica-patch.yaml

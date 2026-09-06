@@ -1,0 +1,15 @@
+# WHY: reconciles the QA copy of the nginx-demo app (apps/nginx-demo/overlays/qa)
+# into the nginx-qa-app-ns namespace. Same source, different overlay — the "apps"
+# Kustomization does the same for dev.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-qa
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./apps/nginx-demo/overlays/qa
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system

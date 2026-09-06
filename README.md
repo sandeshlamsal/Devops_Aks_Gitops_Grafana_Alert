@@ -10,7 +10,8 @@ Azure-native monitoring.
 ```
 apps/nginx-demo/            the nginx app (deployment + service + ServiceMonitor)
   base/                     base manifests
-  overlays/dev/             dev overlay (replica count)
+  overlays/dev/             dev overlay  → namespace nginx-dev-app-ns (2 replicas)
+  overlays/qa/              qa overlay   → namespace nginx-qa-app-ns  (1 replica)
 
 infrastructure/
   prometheus/               BACKEND       — reconciled by clusters/dev/prometheus.yaml
@@ -52,11 +53,13 @@ Flux applies five Kustomizations: `apps` and `prometheus`, then `grafana-operato
 (dependsOn `prometheus`), then `grafana` (dependsOn `grafana-operator`); `alert` also
 dependsOn `prometheus`. The app runs in its own namespace, `nginx-dev-app-ns`.
 
-**Adding another app namespace (e.g. `qa`)** — nothing in `infrastructure/` changes.
-Copy `apps/nginx-demo/overlays/dev` to a `qa` overlay (new `namespace.yaml` + `namespace:`
-value), add an `apps-qa` Flux Kustomization for it. Prometheus auto-discovers the new
-ServiceMonitor (`serviceMonitorNamespaceSelector: {}`), the `NginxPodRestarting` rule is
-namespace-agnostic, and the Grafana dashboard's `Namespace` variable picks it up.
+**Multi-environment.** `apps/nginx-demo/overlays/dev` and `.../qa` deploy the same base
+into `nginx-dev-app-ns` and `nginx-qa-app-ns` via the `apps` and `apps-qa` Flux
+Kustomizations. Nothing in `infrastructure/` is per-environment: Prometheus
+auto-discovers each overlay's ServiceMonitor (`serviceMonitorNamespaceSelector: {}`),
+the `NginxPodRestarting` rule matches the workload by name in any namespace, and the
+Grafana dashboard's `Namespace` variable lists whatever exists. To add `staging`, copy
+an overlay and add one more Flux Kustomization — no infra edits.
 
 ## Before you push
 
@@ -102,6 +105,7 @@ az k8s-configuration flux create \
   --url https://github.com/sandeshlamsal/Devops_Aks_Gitops_Grafana_Alert \
   --branch main \
   --kustomization name=apps            path=./apps/nginx-demo/overlays/dev prune=true \
+  --kustomization name=apps-qa         path=./apps/nginx-demo/overlays/qa  prune=true \
   --kustomization name=prometheus      path=./infrastructure/prometheus    prune=true \
   --kustomization name=grafana-operator path=./infrastructure/grafana/operator prune=true dependsOn=["prometheus"] \
   --kustomization name=grafana         path=./infrastructure/grafana       prune=true dependsOn=["grafana-operator"] \
@@ -112,7 +116,8 @@ az k8s-configuration flux create \
 
 ```bash
 kubectl get kustomization -n flux-system
-kubectl get pods -n nginx-dev-app-ns                     # nginx-demo, 2/2 per pod
+kubectl get pods -n nginx-dev-app-ns                     # nginx-demo, 2 pods
+kubectl get pods -n nginx-qa-app-ns                      # nginx-demo, 1 pod
 kubectl get pods -n monitoring                  # prometheus, alertmanager, grafana, grafana-operator
 kubectl get grafana,grafanadashboard -n monitoring
 kubectl get prometheusrule,alertmanagerconfig -n monitoring
