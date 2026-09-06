@@ -21,6 +21,11 @@ kubectl port-forward -n monitoring svc/grafana-service 3000:3000
 http://localhost:3000 — `admin` / `changeme123` (change `admin_password` in `grafana.yaml`).
 Dashboard: **nginx-demo pods**.
 
+**Multi-namespace:** the dashboard has a `Namespace` variable
+(`label_values(kube_pod_info{pod=~"nginx-demo-.*"}, namespace)`, defaults to *All*).
+Deploy the app into a new namespace and it shows up in the dropdown automatically —
+panels group series by `namespace/pod`.
+
 ## Change the dashboard
 
 Edit `json/nginx-demo.json`, commit, push — Flux regenerates the ConfigMap and the

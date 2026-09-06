@@ -17,8 +17,14 @@ kustomization.yaml
 | `AlertmanagerConfig` (`alertmanager-config.yaml`) | Route every alert to the `email` receiver → `parasisandesh@hotmail.com`, via Gmail SMTP. |
 
 `NginxPodRestarting` fires when
-`increase(kube_pod_container_status_restarts_total{pod=~"nginx-demo.*"}[5m]) > 0` for 1m.
-The Gmail app password comes from the `gmail-smtp-secret` Secret (see the repo root README).
+`increase(kube_pod_container_status_restarts_total{container="nginx-demo", pod=~"nginx-demo-.*"}[5m]) > 0`
+for 1m. The Gmail app password comes from the `gmail-smtp-secret` Secret (see the repo
+root README).
+
+**Multi-namespace:** the rule is *not* pinned to a namespace — it matches the nginx-demo
+workload by container/pod name. Deploy the app into a new namespace (`qa`, `staging`, …)
+and it is covered with no change here. The alert's `namespace` label carries the real
+namespace and Alertmanager groups by it.
 
 ## Test it
 

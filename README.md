@@ -52,6 +52,12 @@ Flux applies five Kustomizations: `apps` and `prometheus`, then `grafana-operato
 (dependsOn `prometheus`), then `grafana` (dependsOn `grafana-operator`); `alert` also
 dependsOn `prometheus`. The app runs in its own namespace, `nginx-dev-app-ns`.
 
+**Adding another app namespace (e.g. `qa`)** — nothing in `infrastructure/` changes.
+Copy `apps/nginx-demo/overlays/dev` to a `qa` overlay (new `namespace.yaml` + `namespace:`
+value), add an `apps-qa` Flux Kustomization for it. Prometheus auto-discovers the new
+ServiceMonitor (`serviceMonitorNamespaceSelector: {}`), the `NginxPodRestarting` rule is
+namespace-agnostic, and the Grafana dashboard's `Namespace` variable picks it up.
+
 ## Before you push
 
 1. **Image** — build and push the nginx image (bakes in `default.conf` with `stub_status`

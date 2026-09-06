@@ -1,7 +1,12 @@
-# Alert: NginxPodRestarting — fires when an nginx-demo pod restarts.
+# Alert: NginxPodRestarting — fires when an nginx-demo pod restarts, in ANY namespace.
 # A PrometheusRule CR: the Prometheus Operator loads it into Prometheus, which
 # evaluates the expr and forwards firing alerts to Alertmanager. Routing to email is
 # in ../alertmanager-config.yaml.
+#
+# Namespace-agnostic on purpose: it matches the nginx-demo workload by container/pod
+# name, not by a hard-coded namespace, so a new namespace (qa, staging, ...) running
+# the same app is covered automatically. The firing alert carries the real namespace
+# in its `namespace` label, and Alertmanager groups by it.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -14,7 +19,7 @@ spec:
     - name: nginx-demo
       rules:
         - alert: NginxPodRestarting
-          expr: increase(kube_pod_container_status_restarts_total{namespace="nginx-dev-app-ns", pod=~"nginx-demo.*"}[5m]) > 0
+          expr: increase(kube_pod_container_status_restarts_total{container="nginx-demo", pod=~"nginx-demo-.*"}[5m]) > 0
           for: 1m
           labels:
             severity: warning

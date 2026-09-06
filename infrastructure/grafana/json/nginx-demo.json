@@ -4,6 +4,23 @@
   "schemaVersion": 39,
   "time": { "from": "now-6h", "to": "now" },
   "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "label": "Namespace",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheusdatasource" },
+        "query": { "query": "label_values(kube_pod_info{pod=~\"nginx-demo-.*\"}, namespace)", "refId": "namespace" },
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
   "panels": [
     {
       "type": "timeseries",
@@ -13,8 +30,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"nginx-dev-app-ns\", pod=~\"nginx-demo.*\", container!=\"\"}[5m])) by (pod)",
-          "legendFormat": "{{pod}}"
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", pod=~\"nginx-demo-.*\", container!=\"\"}[5m])) by (namespace, pod)",
+          "legendFormat": "{{namespace}}/{{pod}}"
         }
       ]
     },
@@ -27,8 +44,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(container_memory_working_set_bytes{namespace=\"nginx-dev-app-ns\", pod=~\"nginx-demo.*\", container!=\"\"}) by (pod)",
-          "legendFormat": "{{pod}}"
+          "expr": "sum(container_memory_working_set_bytes{namespace=~\"$namespace\", pod=~\"nginx-demo-.*\", container!=\"\"}) by (namespace, pod)",
+          "legendFormat": "{{namespace}}/{{pod}}"
         }
       ]
     },
@@ -40,8 +57,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(kube_pod_container_status_restarts_total{namespace=\"nginx-dev-app-ns\", pod=~\"nginx-demo.*\"}) by (pod)",
-          "legendFormat": "{{pod}}"
+          "expr": "sum(kube_pod_container_status_restarts_total{namespace=~\"$namespace\", pod=~\"nginx-demo-.*\"}) by (namespace, pod)",
+          "legendFormat": "{{namespace}}/{{pod}}"
         }
       ]
     }
