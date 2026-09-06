@@ -1,5 +1,5 @@
 # The Grafana instance + its Prometheus datasource, as CRs.
-# The operator builds the Deployment and Service (grafana-service:3000) from this.
+# The operator builds the Deployment and Service from this.
 # Grafana is used for dashboards only — alerting/email is Prometheus + Alertmanager
 # (see ../alert/), so there is no SMTP config here.
 # The label dashboards: "grafana" is what dashboard.yaml selects on.
@@ -15,7 +15,15 @@ spec:
   config:
     security:
       admin_user: admin
-      admin_password: changeme123
+      admin_password: changeme123      # DEMO ONLY — the service below is a public LoadBalancer
+    server:
+      root_url: "%(protocol)s://%(domain)s/"
+  service:
+    # Exposes Grafana on a public IP so the team can reach it without port-forward.
+    # For anything real: change admin_password (use $__env{...} + a Secret) and/or
+    # front it with auth, or switch back to ClusterIP + an Ingress.
+    spec:
+      type: LoadBalancer
 ---
 apiVersion: grafana.integreatly.org/v1beta1
 kind: GrafanaDatasource
