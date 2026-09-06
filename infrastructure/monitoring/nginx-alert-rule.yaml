@@ -27,3 +27,12 @@ spec:
           annotations:
             summary: "nginx-demo has fewer than 2 ready pods"
             description: "Only {{ $value }} nginx-demo pod(s) are Ready in namespace default. Expected 2."
+        - alert: NginxExporterTargetDown
+          expr: |
+            up{job="nginx-demo"} == 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "nginx-demo metrics endpoint is unreachable"
+            description: "Prometheus cannot scrape the nginx-prometheus-exporter sidecar for {{ $labels.pod }}. Check the ServiceMonitor and the exporter container."

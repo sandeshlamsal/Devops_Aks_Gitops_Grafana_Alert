@@ -5,3 +5,4 @@ resources:
   - helmrepository.yaml
   - helmrelease.yaml
   - nginx-alert-rule.yaml
+  - alertmanagerconfig.yaml

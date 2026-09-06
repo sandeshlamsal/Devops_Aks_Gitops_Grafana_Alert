@@ -22,34 +22,22 @@ spec:
     alertmanager:
       alertmanagerSpec:
         replicas: 1
-        secrets:
-          - gmail-smtp-secret
+        alertmanagerConfigSelector: {}
+        alertmanagerConfigNamespaceSelector: {}
+        alertmanagerConfigMatcherStrategy:
+          type: None
       config:
         global:
           resolve_timeout: 5m
-          smtp_smarthost: "smtp.gmail.com:587"
-          smtp_from: "sunwalsandesh@gmail.com"
-          smtp_auth_username: "sunwalsandesh@gmail.com"
-          smtp_auth_password_file: "/etc/alertmanager/secrets/gmail-smtp-secret/password"
-          smtp_require_tls: true
         route:
-          receiver: "email-notifications"
-          group_by: ["alertname", "namespace"]
-          group_wait: 30s
-          group_interval: 5m
-          repeat_interval: 1h
+          receiver: "null"
         receivers:
           - name: "null"
-          - name: "email-notifications"
-            email_configs:
-              - to: "parasisandesh@hotmail.com"
-                send_resolved: true
-                headers:
-                  subject: "[Alert] {{ .CommonAnnotations.summary }}"
-                text: "{{ .CommonAnnotations.description }}"
     prometheus:
       prometheusSpec:
         retention: 5d
+        serviceMonitorSelector: {}
+        serviceMonitorNamespaceSelector: {}
         resources:
           requests:
             cpu: 50m

@@ -1,0 +1,17 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nginx-demo
+  labels:
+    release: kube-prom-stack
+spec:
+  selector:
+    matchLabels:
+      app: nginx-demo
+  namespaceSelector:
+    matchNames:
+      - default
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s

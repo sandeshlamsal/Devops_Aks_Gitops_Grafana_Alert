@@ -1,0 +1,28 @@
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: nginx-demo-routing
+  namespace: monitoring
+spec:
+  route:
+    receiver: "email-notifications"
+    groupBy: ["alertname", "namespace"]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 1h
+  receivers:
+    - name: "email-notifications"
+      emailConfigs:
+        - to: "parasisandesh@hotmail.com"
+          from: "sunwalsandesh@gmail.com"
+          smarthost: "smtp.gmail.com:587"
+          authUsername: "sunwalsandesh@gmail.com"
+          authPassword:
+            name: gmail-smtp-secret
+            key: password
+          requireTLS: true
+          sendResolved: true
+          headers:
+            - key: "Subject"
+              value: "[Alert] {{ .CommonAnnotations.summary }}"
+          text: "{{ .CommonAnnotations.description }}"
