@@ -1,0 +1,13 @@
+# A Grafana folder so our own dashboards sit apart from anything else.
+# GrafanaDashboard CRs reference it by metadata.name via `spec.folderRef`.
+# Add more folders here (one CR each) if you want to group dashboards further.
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaFolder
+metadata:
+  name: custom-application-dashboards
+  namespace: monitoring
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: "grafana"
+  title: "Custom Application Dashboards"

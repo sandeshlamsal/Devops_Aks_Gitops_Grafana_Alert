@@ -1,5 +1,5 @@
 {
-  "title": "nginx-demo pods",
+  "title": "Nginx Dashboard",
   "uid": "nginx-demo",
   "schemaVersion": 39,
   "time": { "from": "now-6h", "to": "now" },

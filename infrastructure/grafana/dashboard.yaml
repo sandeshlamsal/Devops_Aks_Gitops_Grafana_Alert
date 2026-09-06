@@ -1,7 +1,10 @@
-# The nginx-demo dashboard: per-pod CPU, memory and restarts.
+# The "Nginx Dashboard": per-pod CPU, memory and restarts, with a Namespace picker
+# (dev / qa / any namespace running the app).
+#
 # The dashboard model is NOT inline here — it lives in json/nginx-demo.json and is
-# bundled into the `grafana-dashboards` ConfigMap by kustomization.yaml. This CR just
-# points the operator at that ConfigMap key.
+# bundled into the `grafana-dashboards` ConfigMap by kustomization.yaml. This CR points
+# the operator at that ConfigMap key and files it under the "Custom Application
+# Dashboards" folder (folder.yaml).
 #
 # To change the dashboard: edit json/nginx-demo.json (or paste a fresh model exported
 # from the Grafana UI), commit, push.
@@ -14,6 +17,7 @@ spec:
   instanceSelector:
     matchLabels:
       dashboards: "grafana"
+  folderRef: custom-application-dashboards
   resyncPeriod: 5m
   configMapRef:
     name: grafana-dashboards

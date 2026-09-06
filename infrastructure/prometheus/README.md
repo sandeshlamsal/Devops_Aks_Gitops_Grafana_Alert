@@ -1,27 +1,80 @@
-# infrastructure/prometheus — metrics + alerting backend
+# infrastructure/prometheus — metrics & alerting backend
 
-Installs **kube-prometheus-stack** (Prometheus + Prometheus Operator + Alertmanager +
-node-exporter + kube-state-metrics) via a Flux HelmRelease. Reconciled by
-`clusters/dev/prometheus.yaml`. `grafana` and `alert` both `dependsOn` this.
+Installs **kube-prometheus-stack** via a Flux `HelmRelease`: Prometheus + the Prometheus
+Operator + Alertmanager + node-exporter + kube-state-metrics. Everything else builds on
+this — `grafana` reads Prometheus as a datasource, `alert` adds `PrometheusRule` /
+`AlertmanagerConfig` CRs that this chart's operator reconciles.
 
-```
-namespace.yaml              the monitoring namespace
-kube-prometheus-stack.yaml  HelmRepository + HelmRelease
-```
+Reconciled by the Flux Kustomization at path `./infrastructure/prometheus` (named
+`prometheus` in `clusters/dev/` and in a fresh bootstrap; the live cluster kept the
+original name `infrastructure` — same thing, see the root README §2).
 
-Key chart values (`kube-prometheus-stack.yaml`):
+`grafana-operator` and `alert` both `dependsOn` this Kustomization.
+
+---
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `namespace.yaml` | the `monitoring` namespace — everything monitoring-related lands here |
+| `kube-prometheus-stack.yaml` | `HelmRepository` (prometheus-community) + `HelmRelease` (`kube-prom-stack`) |
+| `kustomization.yaml` | applies the two files above |
+
+---
+
+## Chart values that matter (`kube-prometheus-stack.yaml`)
 
 | Value | Why |
-|-------|-----|
-| `grafana.enabled: false` | Dashboards come from the Grafana Operator (`../grafana/`). |
-| `alertmanager.alertmanagerSpec.alertmanagerConfigSelector: {}` + `...NamespaceSelector: {}` + `alertmanagerConfigMatcherStrategy.type: None` | Pick up `AlertmanagerConfig` CRs from any namespace and let the CR's route be the real root route. |
-| `prometheus.prometheusSpec.serviceMonitorSelector / ruleSelector` = `{}` (+ namespace selectors) | Discover `ServiceMonitor` and `PrometheusRule` CRs in any namespace, not just the chart's own labelled ones. |
+|---|---|
+| `grafana.enabled: false` | dashboards come from the Grafana Operator (`../grafana/`), not this chart's bundled Grafana — one Grafana on the cluster |
+| `prometheus.prometheusSpec.serviceMonitorSelector: {}` + `serviceMonitorNamespaceSelector: {}` | discover **every** `ServiceMonitor` in **every** namespace — so `apps/nginx-demo/base/servicemonitor.yaml` is picked up wherever an overlay deploys it |
+| `prometheus.prometheusSpec.ruleSelector: {}` + `ruleNamespaceSelector: {}` | same, for `PrometheusRule` CRs |
+| `alertmanager.alertmanagerSpec.alertmanagerConfigSelector: {}` + `alertmanagerConfigNamespaceSelector: {}` | discover every `AlertmanagerConfig` CR |
+| `alertmanager.alertmanagerSpec.alertmanagerConfigMatcherStrategy.type: None` | the `AlertmanagerConfig`'s own `route` becomes the true root route — no auto-injected `namespace=` matcher that would otherwise scope routing to the CR's namespace |
+| `alertmanager...config.route.receiver: "null"` (+ a `null` receiver) | a valid empty default; real routing is added by `../alert/alertmanager-config.yaml` |
+| `prometheus.prometheusSpec.retention: 5d` | small demo footprint |
+
+> `PrometheusRule` CRs still need `labels.release: kube-prom-stack` — the chart's default
+> rule selector matches that label even with `ruleSelector: {}` set on some versions.
+> Keep the label on every rule to be safe.
+
+---
+
+## How discovery works (why new namespaces "just work")
+
+```
+overlay deploys:  Service (labels app=nginx-demo) + ServiceMonitor (selector app=nginx-demo)
+                        │
+Prometheus Operator ────┘  serviceMonitorNamespaceSelector:{} → looks in ALL namespaces
+                        │  serviceMonitorSelector:{}          → matches ALL ServiceMonitors
+                        ▼
+   writes a scrape job into Prometheus  → new pods scraped within one interval (15s)
+```
+
+So a `staging` overlay in `nginx-staging-app-ns` needs **no** change here.
+
+---
 
 ## Verify
 
 ```bash
-kubectl get helmrelease -n monitoring kube-prom-stack
-kubectl get pods -n monitoring          # prometheus-*, alertmanager-*, kube-state-metrics, node-exporter
+kubectl get helmrelease kube-prom-stack -n monitoring          # READY=True
+kubectl get pods -n monitoring | grep -E 'prometheus|alertmanager|kube-state|node-exporter|operator'
+
 kubectl port-forward -n monitoring svc/kube-prom-stack-kube-prome-prometheus 9090:9090
-# http://localhost:9090/targets  → the nginx-demo job should be UP
+#   http://localhost:9090/targets   → nginx-demo targets, one per pod, UP
+#   http://localhost:9090/rules     → NginxPodRestarting listed
+#   http://localhost:9090/config    → scrape configs
+
+# Alertmanager
+kubectl port-forward -n monitoring svc/kube-prom-stack-kube-prome-alertmanager 9093:9093
+#   http://localhost:9093           → active alerts
+curl -s http://localhost:9093/api/v2/status | jq -r '.config.original' | head -40
 ```
+
+## Upgrade the chart
+
+Bump `spec.chart.spec.version` in `kube-prometheus-stack.yaml`, commit, push,
+`flux reconcile kustomization nginx-demo-config-infrastructure -n flux-system`. The
+helm-controller runs the upgrade; CRDs are updated by the chart's own CRD job.
