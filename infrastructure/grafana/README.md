@@ -23,6 +23,50 @@ would never install. Splitting it — operator in its own Kustomization that `gr
 
 ---
 
+## Viewing the dashboard
+
+This Grafana is **not** the Azure portal's *Monitoring → Dashboards with Grafana* menu
+(that's Azure Managed Grafana, a different instance fed by Azure Monitor). Ours is a pod
+in the `monitoring` namespace, exposed by `grafana-service`.
+
+**Option A — shared URL (the service is a `LoadBalancer`):**
+
+```bash
+kubectl get svc grafana-service -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+```
+
+Open `http://<EXTERNAL-IP>:3000` — currently **http://20.161.101.114:3000**
+
+- login: `admin` / `changeme123` (from `grafana.yaml` → `spec.config.security`)
+- **Dashboards → Custom Application Dashboards → Nginx Dashboard**
+  direct: `http://<EXTERNAL-IP>:3000/d/nginx-demo/nginx-dashboard`
+- folder: `http://<EXTERNAL-IP>:3000/dashboards/f/<folder-uid>/custom-application-dashboards`
+- top-left **Namespace** dropdown → `nginx-dev-app-ns` / `nginx-qa-app-ns` / *All*
+
+> The IP is internet-facing with a demo password — see [Exposing Grafana](#exposing-grafana)
+> for how to lock it down (Secret-backed password, or ClusterIP + Ingress with auth).
+
+**Option B — no exposure (port-forward):**
+
+```bash
+kubectl port-forward -n monitoring svc/grafana-service 3000:3000
+# http://localhost:3000  → same login, same paths
+```
+
+**Check it from the CLI:**
+
+```bash
+IP=$(kubectl get svc grafana-service -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+curl -s -u admin:changeme123 "http://$IP:3000/api/search?type=dash-db"
+#   → [{"title":"Nginx Dashboard", ... "folderTitle":"Custom Application Dashboards" ...}]
+```
+
+If the dashboard is briefly missing after a Grafana pod restart: it's stateless (no PVC),
+and the operator re-pushes it every `resyncPeriod` (1m). Force it now with
+`kubectl rollout restart deploy/grafana-operator -n monitoring`.
+
+---
+
 ## Files
 
 | Path | Kind | Purpose |

@@ -18,7 +18,11 @@ spec:
     matchLabels:
       dashboards: "grafana"
   folderRef: custom-application-dashboards
-  resyncPeriod: 5m
+  # Grafana keeps its state in an in-pod SQLite DB (no PVC — stateless by design here).
+  # The operator re-pushes this dashboard every resyncPeriod, so if the Grafana pod
+  # restarts the dashboard is back within a minute. git is the source of truth; edits
+  # made in the Grafana UI are overwritten.
+  resyncPeriod: 1m
   configMapRef:
     name: grafana-dashboards
     key: nginx-demo.json

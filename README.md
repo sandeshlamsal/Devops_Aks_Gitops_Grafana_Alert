@@ -283,25 +283,40 @@ curl -s 'http://localhost:9090/api/v1/targets?state=active' \
 
 ### Open our Grafana
 
-```bash
-kubectl port-forward -n monitoring svc/grafana-service 3000:3000
-# http://localhost:3000  → admin / <admin_password from grafana.yaml>
-```
+> **This is our own in-cluster Grafana — not** the AKS portal's *Monitoring → Dashboards
+> with Grafana* (that's Azure Managed Grafana, a separate instance on Azure's own
+> Prometheus). Our custom dashboard only exists here.
 
-- **Dashboards → Custom Application Dashboards → Nginx Dashboard**
-- top-left **Namespace** dropdown → pick `nginx-dev-app-ns`, `nginx-qa-app-ns`, or *All*
-
-Quick API check without a browser:
+`grafana-service` is a **`LoadBalancer`** (set in `infrastructure/grafana/grafana.yaml`):
 
 ```bash
-curl -s -u admin:changeme123 http://localhost:3000/api/health
-curl -s -u admin:changeme123 http://localhost:3000/api/datasources
-curl -s -u admin:changeme123 'http://localhost:3000/api/datasources/uid/prometheusdatasource/health'
-curl -s -u admin:changeme123 'http://localhost:3000/api/search?query=Nginx'
+kubectl get svc grafana-service -n monitoring \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}'      # → e.g. 20.161.101.114
 ```
 
-> `grafana-service` is a ClusterIP — reachable via `port-forward`. To give the team a URL,
-> expose it (LoadBalancer or Ingress) — see [`infrastructure/grafana/README.md`](infrastructure/grafana/README.md#exposing-grafana).
+| | URL |
+|---|---|
+| Grafana | `http://<EXTERNAL-IP>:3000` — currently **http://20.161.101.114:3000** |
+| Nginx Dashboard | `http://<EXTERNAL-IP>:3000/d/nginx-demo/nginx-dashboard` |
+| folder | `http://<EXTERNAL-IP>:3000/dashboards` → **Custom Application Dashboards** |
+
+- login: **`admin` / `changeme123`** (`grafana.yaml` → `spec.config.security`)
+- top-left **Namespace** dropdown → `nginx-dev-app-ns` / `nginx-qa-app-ns` / *All*
+
+No exposure? `kubectl port-forward -n monitoring svc/grafana-service 3000:3000` → `http://localhost:3000`.
+
+Quick API check:
+
+```bash
+IP=$(kubectl get svc grafana-service -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+curl -s -u admin:changeme123 "http://$IP:3000/api/health"
+curl -s -u admin:changeme123 "http://$IP:3000/api/datasources/uid/prometheusdatasource/health"
+curl -s -u admin:changeme123 "http://$IP:3000/api/search?type=dash-db"
+```
+
+> ⚠️ The IP is internet-facing with a demo password. Before real use: Secret-backed
+> `admin_password` (`$__env{GF_SECURITY_ADMIN_PASSWORD}`), or ClusterIP + Ingress with
+> auth — see [`infrastructure/grafana/README.md`](infrastructure/grafana/README.md#exposing-grafana).
 
 ---
 
