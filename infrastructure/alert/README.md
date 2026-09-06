@@ -23,7 +23,7 @@ The Gmail app password comes from the `gmail-smtp-secret` Secret (see the repo r
 ## Test it
 
 ```bash
-kubectl exec -n default deploy/nginx-demo -- sh -c "kill 1"     # restarts one pod
+kubectl exec -n nginx-dev-app-ns deploy/nginx-demo -- sh -c "kill 1"     # restarts one pod
 kubectl port-forward -n monitoring svc/kube-prom-stack-kube-prome-alertmanager 9093:9093
 ```
 `NginxPodRestarting` shows Pending → Firing at http://localhost:9093 within ~1–2 min,

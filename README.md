@@ -48,8 +48,9 @@ nginx-demo pods ──/metrics──▶ Prometheus ─────────�
                     email (Gmail SMTP) → parasisandesh@hotmail.com
 ```
 
-Flux applies four Kustomizations: `apps` and `prometheus`, then `grafana` and `alert`
-(both `dependsOn: prometheus`).
+Flux applies five Kustomizations: `apps` and `prometheus`, then `grafana-operator`
+(dependsOn `prometheus`), then `grafana` (dependsOn `grafana-operator`); `alert` also
+dependsOn `prometheus`. The app runs in its own namespace, `nginx-dev-app-ns`.
 
 ## Before you push
 
@@ -105,7 +106,7 @@ az k8s-configuration flux create \
 
 ```bash
 kubectl get kustomization -n flux-system
-kubectl get pods -n default                     # nginx-demo, 2/2 per pod
+kubectl get pods -n nginx-dev-app-ns                     # nginx-demo, 2/2 per pod
 kubectl get pods -n monitoring                  # prometheus, alertmanager, grafana, grafana-operator
 kubectl get grafana,grafanadashboard -n monitoring
 kubectl get prometheusrule,alertmanagerconfig -n monitoring
@@ -122,7 +123,7 @@ Dashboard: **nginx-demo pods** (CPU / memory / restarts per pod).
 ## Test the alert
 
 ```bash
-kubectl exec -n default deploy/nginx-demo -- sh -c "kill 1"     # restarts one pod
+kubectl exec -n nginx-dev-app-ns deploy/nginx-demo -- sh -c "kill 1"     # restarts one pod
 kubectl port-forward -n monitoring svc/kube-prom-stack-kube-prome-alertmanager 9093:9093
 ```
 `NginxPodRestarting` shows Pending → Firing at http://localhost:9093 within ~1–2 minutes,

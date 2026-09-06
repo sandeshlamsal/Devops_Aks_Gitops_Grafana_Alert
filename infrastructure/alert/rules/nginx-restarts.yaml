@@ -14,7 +14,7 @@ spec:
     - name: nginx-demo
       rules:
         - alert: NginxPodRestarting
-          expr: increase(kube_pod_container_status_restarts_total{namespace="default", pod=~"nginx-demo.*"}[5m]) > 0
+          expr: increase(kube_pod_container_status_restarts_total{namespace="nginx-dev-app-ns", pod=~"nginx-demo.*"}[5m]) > 0
           for: 1m
           labels:
             severity: warning

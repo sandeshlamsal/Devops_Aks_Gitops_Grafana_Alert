@@ -1,0 +1,5 @@
+# Dev app namespace. Keeps the demo app out of the default namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nginx-dev-app-ns

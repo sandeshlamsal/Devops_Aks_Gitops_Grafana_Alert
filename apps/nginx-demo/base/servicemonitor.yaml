@@ -1,4 +1,6 @@
 # Tells the Prometheus Operator to scrape the nginx-demo exporter every 15s.
+# No namespaceSelector — it scrapes the Service in its own namespace (nginx-dev-app-ns),
+# so this works unchanged whatever namespace the overlay deploys into.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -9,9 +11,6 @@ spec:
   selector:
     matchLabels:
       app: nginx-demo
-  namespaceSelector:
-    matchNames:
-      - default
   endpoints:
     - port: metrics
       path: /metrics
