@@ -1,18 +1,3 @@
-# AKS GitOps Demo — nginx + kube-prometheus-stack via Flux
-
-Minimal nginx app deployed to AKS via Flux + Kustomize, with Prometheus/Grafana/Alertmanager
-installed as a Flux-managed Helm release.
-
-## Structure
-
-```
-docker/                          Dockerfile + static site for the nginx image
-apps/nginx-demo/base/            Base Deployment + Service (Kustomize)
-apps/nginx-demo/overlays/dev/    Dev overlay (replica count patch)
-infrastructure/monitoring/       HelmRepository + HelmRelease for kube-prometheus-stack
-clusters/dev/                    Flux Kustomization CRDs (what Flux reconciles)
-```
-
 # AKS GitOps Demo — nginx + kube-prometheus-stack via Flux (Operator Model)
 
 Nginx app deployed to AKS via Flux + Kustomize, with Prometheus/Grafana/Alertmanager
@@ -34,7 +19,12 @@ apps/nginx-demo/base/
 apps/nginx-demo/overlays/dev/        Dev overlay (replica count patch)
 infrastructure/monitoring/
   helmrepository.yaml, helmrelease.yaml   kube-prometheus-stack, cross-namespace CRD discovery enabled
-  nginx-alert-rule.yaml              PrometheusRule — alert conditions
+  alerts/                            one PrometheusRule file per alert — see "Adding a new alert" below
+    nginx-restarts.yaml
+    nginx-availability.yaml
+    nginx-metrics-down.yaml
+    _TEMPLATE.yaml                   copy-paste starting point, not applied
+    kustomization.yaml
   alertmanagerconfig.yaml            AlertmanagerConfig — routing + email receiver (operator-native)
 clusters/dev/                        Flux Kustomization CRDs (what Flux reconciles)
 ```
@@ -50,7 +40,7 @@ ServiceMonitor (apps/nginx-demo/base/servicemonitor.yaml)
       ▼
 Prometheus (scrapes metrics, evaluates PrometheusRule)
       │
-PrometheusRule (infrastructure/monitoring/nginx-alert-rule.yaml)
+PrometheusRule (infrastructure/monitoring/alerts/*.yaml — one file per alert)
       │ fires alerts: NginxPodRestarting, NginxPodNotReady, NginxExporterTargetDown
       ▼
 Alertmanager ← AlertmanagerConfig (infrastructure/monitoring/alertmanagerconfig.yaml)
@@ -156,15 +146,37 @@ selector (`app: nginx-demo`) matches the Service's labels.
 
 ## Alert rules
 
-`infrastructure/monitoring/nginx-alert-rule.yaml` defines:
+Each alert lives in its own file under `infrastructure/monitoring/alerts/` — this keeps
+rules independently reviewable and easy to add without touching unrelated alerts:
 
-- **NginxPodRestarting** — fires if any `nginx-demo` pod's container restart count
-  increases within a 5-minute window.
-- **NginxPodNotReady** — fires if fewer than 2 `nginx-demo` pods are Ready for 2+ minutes.
-- **NginxExporterTargetDown** — fires if Prometheus can't scrape the exporter sidecar
-  at all (`up{job="nginx-demo"} == 0`) — this one specifically exercises the `ServiceMonitor`.
+- **`nginx-restarts.yaml`** — **NginxPodRestarting** fires if any `nginx-demo` pod's
+  container restart count increases within a 5-minute window.
+- **`nginx-availability.yaml`** — **NginxPodNotReady** fires if fewer than 2 `nginx-demo`
+  pods are Ready for 2+ minutes.
+- **`nginx-metrics-down.yaml`** — **NginxExporterTargetDown** fires if Prometheus can't
+  scrape the exporter sidecar at all (`up{job="nginx-demo"} == 0`) — this one specifically
+  exercises the `ServiceMonitor`.
 
 All three route through `infrastructure/monitoring/alertmanagerconfig.yaml`'s
+`email-notifications` receiver → `parasisandesh@hotmail.com`, sent via Gmail SMTP.
+Every `PrometheusRule` needs the label `release: kube-prom-stack` — required for the
+chart's default rule selector to pick it up.
+
+### Adding a new alert
+
+1. Copy the template: `cp infrastructure/monitoring/alerts/_TEMPLATE.yaml infrastructure/monitoring/alerts/<your-alert-name>.yaml`
+2. Fill in the placeholders (alert name, PromQL expression, duration, severity, summary/description).
+   The template includes example expressions for high CPU, high memory, and replica-count checks.
+3. Add the new filename to `infrastructure/monitoring/alerts/kustomization.yaml`'s `resources:` list.
+   **This step is easy to forget** — a file that exists and is committed but isn't listed
+   here is silently never applied. See the Troubleshooting table in the team reference doc.
+4. Commit and push. No `kubectl apply` — git is the source of truth.
+5. Verify: `kubectl get prometheusrule -n monitoring` should list your new rule's `metadata.name`.
+
+No changes to `alertmanagerconfig.yaml` are needed for a new alert unless it should route
+to a different receiver (e.g. a different team's Slack channel) — by default every alert
+routes through the same `email-notifications` receiver.
+
 `email-notifications` receiver → `parasisandesh@hotmail.com`, sent via Gmail SMTP.
 Every `PrometheusRule` needs the label `release: kube-prom-stack` — required for the
 chart's default rule selector to pick it up.
