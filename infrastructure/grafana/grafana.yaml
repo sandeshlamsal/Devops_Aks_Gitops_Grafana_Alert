@@ -49,6 +49,13 @@ spec:
     spec:
       template:
         spec:
+          # The Grafana image runs as uid/gid 472. An Azure managed-disk PV mounts
+          # root-owned, so without fsGroup the container can't write /var/lib/grafana
+          # and CrashLoopBackOffs.
+          securityContext:
+            runAsUser: 472
+            runAsGroup: 472
+            fsGroup: 472
           # The operator mounts a volume named "grafana-data" at /var/lib/grafana but
           # defaults it to emptyDir — repoint it at the PVC above so Grafana's SQLite
           # (dashboards, prefs) persists across pod restarts.
