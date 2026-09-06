@@ -1,0 +1,29 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: nginx-demo-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prom-stack
+spec:
+  groups:
+    - name: nginx-demo.rules
+      rules:
+        - alert: NginxPodRestarting
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="default", pod=~"nginx-demo.*"}[5m]) > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "nginx-demo pod restarted"
+            description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has restarted {{ $value }} time(s) in the last 5 minutes."
+        - alert: NginxPodNotReady
+          expr: |
+            sum(kube_pod_status_ready{namespace="default", condition="true", pod=~"nginx-demo.*"}) < 2
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "nginx-demo has fewer than 2 ready pods"
+            description: "Only {{ $value }} nginx-demo pod(s) are Ready in namespace default. Expected 2."
