@@ -22,13 +22,15 @@ spec:
     alertmanager:
       alertmanagerSpec:
         replicas: 1
+        secrets:
+          - gmail-smtp-secret
       config:
         global:
           resolve_timeout: 5m
-          smtp_smarthost: "smtp.office365.com:587"
-          smtp_from: "parasisandesh@hotmail.com"
-          smtp_auth_username: "parasisandesh@hotmail.com"
-          smtp_auth_password: "REPLACE_WITH_APP_PASSWORD"
+          smtp_smarthost: "smtp.gmail.com:587"
+          smtp_from: "sunwalsandesh@gmail.com"
+          smtp_auth_username: "sunwalsandesh@gmail.com"
+          smtp_auth_password_file: "/etc/alertmanager/secrets/gmail-smtp-secret/password"
           smtp_require_tls: true
         route:
           receiver: "email-notifications"
