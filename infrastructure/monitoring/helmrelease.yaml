@@ -37,6 +37,7 @@ spec:
           group_interval: 5m
           repeat_interval: 1h
         receivers:
+          - name: "null"
           - name: "email-notifications"
             email_configs:
               - to: "parasisandesh@hotmail.com"
