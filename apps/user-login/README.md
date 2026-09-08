@@ -112,17 +112,41 @@ bao kv put kv/userlogin/jwt secret="$(openssl rand -hex 32)"
 And create the `flux-applier` SA + binding in `userlogin-dev-ns`, `userlogin-qa-ns`,
 `cnpg-system` (root README §3.6).
 
-## Verify
+## E2E test (verified on AKS)
 
 ```bash
+# --- cluster objects ---
 kubectl get pods -n userlogin-dev-ns
-kubectl get cluster,externalsecret,job,cronjob -n userlogin-dev-ns
-kubectl -n userlogin-dev-ns exec userlogin-db-1 -- psql -U appuser -d userlogin -c 'SELECT id,username FROM users ORDER BY id;'
+#   user-login-api-*  1/1   user-login-ui-*  1/1   userlogin-db-1  1/1   userlogin-db-migrate-*  Completed
+kubectl get cluster -n userlogin-dev-ns            # userlogin-db → "Cluster in healthy state"
+kubectl get externalsecret -n userlogin-dev-ns     # userlogin-jwt → SecretSynced=True
+kubectl logs -n userlogin-dev-ns job/userlogin-db-migrate
+#   applying 001_users.sql / migrations up to date / seed complete — 5 users
 
-# UI URL:
-kubectl get svc user-login-ui -n userlogin-dev-ns -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
-#   http://userdir-dev.eastus2.cloudapp.azure.com  → log in as admin / password123
+# --- the app, through the UI's LoadBalancer + Azure DNS name ---
+H=userdir-dev.eastus2.cloudapp.azure.com          # or userdir-qa...
+
+curl -s http://$H/api/healthz                      # {"ok":true,"env":"dev"}
+
+TOKEN=$(curl -s -X POST http://$H/api/login -H 'Content-Type: application/json' \
+        -d '{"username":"admin","password":"password123"}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])')
+
+curl -s http://$H/api/users -H "Authorization: Bearer $TOKEN"
+#   [{"id":1,"username":"admin",...}, ... 5 rows]
+
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://$H/api/login \
+     -H 'Content-Type: application/json' -d '{"username":"admin","password":"wrong"}'   # 401
+curl -s -o /dev/null -w '%{http_code}\n' http://$H/api/users                            # 401 (no token)
 ```
+
+Browser: **http://userdir-dev.eastus2.cloudapp.azure.com** (and `...-qa...`) — log in
+`admin` / `password123`, the user table renders from `/api/users`. Verified end-to-end
+in both namespaces, plus the reset job (`--from=cronjob/userlogin-db-reset` → drops the
+schema, re-migrates, re-seeds back to exactly 5 users).
+
+> **DNS label gotcha:** Azure rejects public-IP domain labels containing reserved words
+> — `userlogin-*` fails with `DomainNameLabelReserved` ("login"). This repo uses
+> `userdir-dev` / `userdir-qa`. Pick a label without `login`/`admin`/trademark-ish words.
 
 ## Local dev
 
