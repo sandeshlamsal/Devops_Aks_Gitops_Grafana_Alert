@@ -121,7 +121,7 @@ infrastructure/
     alertmanager-config.yaml  AlertmanagerConfig — routing + Gmail email receiver
     rules/nginx-restarts.yaml PrometheusRule — NginxPodRestarting
 
-clusters/dev/                 human-readable copies of the Flux Kustomizations (see §3.6)
+clusters/dev/                 human-readable copies of the Flux Kustomizations (see §3.5)
 docker/                       Dockerfile + static site + nginx.conf (stub_status enabled)
 ```
 
@@ -226,7 +226,27 @@ az k8s-configuration flux create \
 is its own Kustomization — Flux refuses to apply a Kustomization containing a CR whose
 CRD is not registered yet.
 
-### 3.6 Wait, then bootstrap OpenBao
+### 3.6 One-time RBAC for the new namespaces
+
+The AKS Flux extension impersonates a `flux-applier` ServiceAccount **in the namespace
+each resource lands in**, but only provisions that SA for namespaces it knows about
+(here: just `flux-system`, because no `--kustomization` sets `targetNamespace`). Our
+HelmReleases declare `metadata.namespace: monitoring | openbao | external-secrets`, so
+those need the SA too, or helm-controller fails with
+`serviceaccount "flux-applier" ... cannot list resource "secrets"`.
+
+```bash
+for ns in monitoring openbao external-secrets nginx-dev-app-ns nginx-qa-app-ns; do
+  kubectl create serviceaccount flux-applier -n "$ns" --dry-run=client -o yaml | kubectl apply -f -
+  kubectl create clusterrolebinding "flux-applier-$ns" --clusterrole=cluster-admin \
+    --serviceaccount="$ns:flux-applier" --dry-run=client -o yaml | kubectl apply -f -
+done
+```
+
+(Alternative: recreate the config passing `targetNamespace=<ns>` on every
+`--kustomization` so the extension provisions the SAs itself.)
+
+### 3.7 Wait, then bootstrap OpenBao
 
 ```bash
 kubectl get kustomization -n flux-system -w        # names are prefixed nginx-demo-config-*
@@ -258,7 +278,7 @@ First reconcile can take a few minutes (Helm installs, image pulls, CRD registra
 > first cluster named the Prometheus Kustomization `infrastructure`; the command above
 > names it `prometheus` — match `clusters/dev/` and the deep-dive READMEs.
 
-### 3.7 Get the Grafana URL
+### 3.8 Get the Grafana URL
 
 ```bash
 kubectl get svc grafana-service -n monitoring \
@@ -270,7 +290,7 @@ kubectl get svc grafana-service -n monitoring \
 Open it → login `admin` / `changeme123` → **Dashboards → Custom Application Dashboards →
 Nginx Dashboard** → use the **Namespace** picker.
 
-### 3.8 Smoke-test the alert
+### 3.9 Smoke-test the alert
 
 ```bash
 kubectl exec -n nginx-dev-app-ns deploy/nginx-demo -c nginx-demo -- sh -c "kill 1"
@@ -341,22 +361,32 @@ This repo keeps **zero secret values in version control**.
 | **OpenBao** (`infrastructure/secrets/openbao/`) | The vault. Stores secrets encrypted at rest, with access policies, an audit log, versioning and rotation. Open-source (MPL-2.0, Linux Foundation) — the fork of HashiCorp Vault; API-compatible with it. |
 | **External Secrets Operator** (`infrastructure/secrets/operator/`) | The bridge. Reconciles `ExternalSecret` CRs: authenticates to OpenBao with its Kubernetes ServiceAccount, reads a path, and writes a normal `Secret` that apps consume. `refreshInterval` re-syncs, so rotating in OpenBao propagates automatically. |
 
-```
-ExternalSecret CR (in git, NO value)
-      │  ESO authenticates: its ServiceAccount token → OpenBao Kubernetes-auth role
-      │                     "external-secrets" → policy "eso-monitoring"
-      ▼
-OpenBao  kv/monitoring/gmail-smtp     (field: password)
-         kv/monitoring/grafana-admin  (field: password)
-      │  ESO writes native Secrets
-      ▼
-Secret monitoring/gmail-smtp-secret ─► Alertmanager (SMTP auth)
-Secret monitoring/grafana-admin     ─► Grafana ($__env{GF_SECURITY_ADMIN_PASSWORD})
+```mermaid
+flowchart LR
+    subgraph obns["namespace: openbao"]
+        BAO["openbao-0 pod"]
+        DISK[("PVC data-openbao-0<br/>ciphertext")]
+        SEAL{{"SEAL<br/>root key → encryption key<br/>(in memory only)"}}
+        KV[["KV v2 — kv/<br/>monitoring/gmail-smtp<br/>monitoring/grafana-admin"]]
+        KAUTH["auth/kubernetes<br/>role external-secrets<br/>→ policy eso-monitoring"]
+        BAO --- DISK
+        BAO -. when unsealed .- SEAL
+        SEAL -. decrypts .-> KV
+    end
+    UNSEAL["3-of-5 unseal keys<br/>(or Azure Key Vault auto-unseal)"] -->|start| SEAL
+    ESO["External Secrets Operator<br/>(SA external-secrets)"]
+    ES["ExternalSecret + ClusterSecretStore<br/>(in git — NO values)"] -->|Flux applies| ESO
+    ESO -->|"SA JWT"| KAUTH -->|"short-lived token"| ESO
+    ESO -->|read| KV
+    ESO -->|write| SEC1[["Secret<br/>gmail-smtp-secret"]] --> AM["Alertmanager<br/>SMTP auth"]
+    ESO -->|write| SEC2[["Secret<br/>grafana-admin"]] --> GR["Grafana<br/>$__env GF_SECURITY_ADMIN_PASSWORD"]
 ```
 
 Every secret in this system lives only in OpenBao. Add another with one `bao kv put` +
-one `ExternalSecret` — see
-[`infrastructure/secrets/README.md`](infrastructure/secrets/README.md#add-a-new-secret).
+one `ExternalSecret` — worked examples in
+[`infrastructure/secrets/README.md`](infrastructure/secrets/README.md#add-a-new-secret--worked-examples),
+which also covers the ServiceAccounts, seal/unseal, and Azure Key Vault auto-unseal in
+depth.
 
 ### 5.2 Seal / unseal — the core OpenBao concept
 
