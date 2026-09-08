@@ -226,7 +226,7 @@ kubectl -n openbao exec openbao-0 -- sh -c '
   bao secrets enable -path=kv kv-v2
   bao auth enable kubernetes
   bao write auth/kubernetes/config kubernetes_host=https://kubernetes.default.svc
-  printf "path \"kv/data/monitoring/*\" { capabilities = [\"read\"] }\n" | bao policy write eso-monitoring -
+  printf "path \"kv/data/monitoring/*\" { capabilities = [\"read\"] }\npath \"kv/data/userlogin/*\" { capabilities = [\"read\"] }\n" | bao policy write eso-monitoring -
   bao write auth/kubernetes/role/external-secrets \
       bound_service_account_names=external-secrets \
       bound_service_account_namespaces=external-secrets \
@@ -234,11 +234,15 @@ kubectl -n openbao exec openbao-0 -- sh -c '
   # seed the values
   bao kv put kv/monitoring/gmail-smtp    password="YOUR_GMAIL_APP_PASSWORD"
   bao kv put kv/monitoring/grafana-admin password="A_STRONG_ADMIN_PASSWORD"
+  bao kv put kv/userlogin/jwt            secret="$(openssl rand -hex 32)"   # user-login API
 '
 ```
 
-Within a minute ESO creates `gmail-smtp-secret` + `grafana-admin`, and `secrets` →
-`grafana` / `alert` go `READY`.
+Within a minute ESO creates `gmail-smtp-secret`, `grafana-admin` and (per user-login
+namespace) `userlogin-jwt`, and `secrets` → `grafana` / `alert` / `user-login-*` go
+`READY`. The `external-secrets` role's `bound_service_account_namespaces` stays
+`external-secrets` — ESO uses one ServiceAccount regardless of which namespace the
+target Secret lands in.
 
 > **Persistence.** OpenBao data is on PVC `data-openbao-0` — survives pod restarts and
 > `az aks stop`/`start`. After a restart you only re-run the **3 unseals** (or nothing,

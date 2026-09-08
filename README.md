@@ -17,10 +17,13 @@ Azure-managed Grafana; our dashboards do not appear there.)
 
 | Deep dive | |
 |---|---|
+| Apps overview (nginx-demo + user-login) | [`apps/README.md`](apps/README.md) |
+| user-login app (React + Node + Postgres, migrations, reset) | [`apps/user-login/README.md`](apps/user-login/README.md) |
 | Prometheus backend | [`infrastructure/prometheus/README.md`](infrastructure/prometheus/README.md) |
 | Grafana + how to add dashboards + the URL/PVC | [`infrastructure/grafana/README.md`](infrastructure/grafana/README.md) |
 | Alerting + how to add rules | [`infrastructure/alert/README.md`](infrastructure/alert/README.md) |
 | Secret management (ESO + OpenBao) | [`infrastructure/secrets/README.md`](infrastructure/secrets/README.md) |
+| CloudNativePG operator | [`infrastructure/cnpg/README.md`](infrastructure/cnpg/README.md) |
 | **Build from scratch (shareable runbook)** | [§3](#3-build-this-from-scratch--step-by-step) |
 | DNS / permanent URL | [§4](#4-dns--the-permanent-url) |
 | Secrets (OpenBao: seal/unseal, auto-unseal) · Hardening | [§5](#5-secrets--security) |
@@ -96,11 +99,16 @@ git.
 ## 2. Repository layout
 
 ```
-apps/nginx-demo/
-  base/                       deployment (nginx + nginx-prometheus-exporter sidecar),
-                              service, servicemonitor  — environment-agnostic
-  overlays/dev/               → namespace nginx-dev-app-ns, 2 replicas
-  overlays/qa/                → namespace nginx-qa-app-ns, 1 replica
+apps/
+  README.md                   apps overview + the base/overlay pattern
+  nginx-demo/                  nginx + exporter sidecar
+    overlays/dev|qa/           → nginx-dev-app-ns (2), nginx-qa-app-ns (1)
+  user-login/                  3 microservices: React UI + Node API + Postgres
+    api/                       Node/Express source + migrations/*.sql + Dockerfile
+    ui/                        React (Vite) source + nginx.conf + Dockerfile
+    k8s/base/                  CNPG Cluster, api, ui, migrate Job, suspended reset CronJob, ExternalSecret
+    k8s/overlays/dev|qa/       → userlogin-dev-ns, userlogin-qa-ns
+    README.md
 
 infrastructure/
   prometheus/                 kube-prometheus-stack Helm install + the monitoring namespace
@@ -109,6 +117,7 @@ infrastructure/
     openbao/                  OpenBao (OSS Vault fork) Helm install — its OWN Flux Kustomization
     stores/                   ClusterSecretStore → OpenBao
     externalsecrets/          ExternalSecret CRs → gmail-smtp-secret, grafana-admin
+  cnpg/                        CloudNativePG operator Helm install — its OWN Flux Kustomization
   grafana/
     operator/                 the Grafana Operator Helm install — its OWN Flux Kustomization
     grafana.yaml              Grafana instance CR (LoadBalancer :80 + Azure DNS label + PVC)
@@ -122,10 +131,10 @@ infrastructure/
     rules/nginx-restarts.yaml PrometheusRule — NginxPodRestarting
 
 clusters/dev/                 human-readable copies of the Flux Kustomizations (see §3.5)
-docker/                       Dockerfile + static site + nginx.conf (stub_status enabled)
+docker/                       Dockerfile for nginx-demo (static site, stub_status enabled)
 ```
 
-Each `infrastructure/*` folder has its own README.
+Each `apps/*` and `infrastructure/*` folder has its own README.
 
 ---
 
@@ -147,35 +156,42 @@ az account set --subscription <SUBSCRIPTION_ID>
 az aks get-credentials -g <RG> -n <CLUSTER>
 ```
 
-### 3.1 Build & push the app image
+### 3.1 Build & push the app images
+
+Cloud-build straight into ACR (no local Docker needed):
 
 ```bash
-cd docker
-docker build -t nginx-demo:v1 .
-az acr login --name <ACR_NAME>
-docker tag nginx-demo:v1 <ACR_NAME>.azurecr.io/nginx-demo:v1
-docker push  <ACR_NAME>.azurecr.io/nginx-demo:v1
+az acr build --registry <ACR_NAME> --image nginx-demo:v1     ./docker
+az acr build --registry <ACR_NAME> --image user-login-api:v1 ./apps/user-login/api
+az acr build --registry <ACR_NAME> --image user-login-ui:v1  ./apps/user-login/ui
 az aks update -g <RG> -n <CLUSTER> --attach-acr <ACR_NAME>
 ```
 
-Set the image in `apps/nginx-demo/base/deployment.yaml` if your registry differs. The
-image bakes in `docker/default.conf` with nginx `stub_status` enabled — the exporter
-sidecar needs it.
+If your registry name isn't `sanaksregistry`, update the image paths in
+`apps/nginx-demo/base/deployment.yaml` and the `images:` blocks in
+`apps/user-login/k8s/overlays/{dev,qa}/kustomization.yaml`. The nginx image bakes in
+`docker/default.conf` with `stub_status` enabled (the exporter sidecar needs it).
 
 ### 3.2 Secrets — nothing is created by hand
 
 Secret **values** never touch the repo. **External Secrets Operator** + **OpenBao** (see
-`infrastructure/secrets/`) sync them into the `gmail-smtp-secret` and `grafana-admin`
-Kubernetes Secrets that Alertmanager and Grafana consume.
+`infrastructure/secrets/`) sync them into Kubernetes Secrets the apps consume:
+`gmail-smtp-secret` (Alertmanager), `grafana-admin` (Grafana), `userlogin-jwt`
+(user-login API). Postgres credentials are generated by CloudNativePG, not OpenBao.
 
 The only manual step is a **one-time OpenBao bootstrap** (init → unseal → enable KV +
-Kubernetes auth → seed the two values), done *after* Flux installs OpenBao in §3.6 — the
-full command block is in [`infrastructure/secrets/README.md`](infrastructure/secrets/README.md#bootstrap-openbao-one-time-after-first-install--after-any-tier--2-rebuild).
-The values you seed:
+Kubernetes auth → policy → seed the values), done *after* Flux installs OpenBao in §3.7
+— full command block in [`infrastructure/secrets/README.md`](infrastructure/secrets/README.md#bootstrap-openbao-one-time--first-install-or-after-any-tier--2-rebuild).
+The policy must read both prefixes, and you seed three values:
 
 ```bash
+bao policy write eso-monitoring - <<'EOF'
+path "kv/data/monitoring/*" { capabilities = ["read"] }
+path "kv/data/userlogin/*"  { capabilities = ["read"] }
+EOF
 bao kv put kv/monitoring/gmail-smtp    password='YOUR_GMAIL_APP_PASSWORD'
 bao kv put kv/monitoring/grafana-admin password='A_STRONG_ADMIN_PASSWORD'
+bao kv put kv/userlogin/jwt            secret="$(openssl rand -hex 32)"
 ```
 
 Update `to:` / `from:` / `authUsername:` in `infrastructure/alert/alertmanager-config.yaml`
@@ -217,26 +233,31 @@ az k8s-configuration flux create \
   --kustomization name=secrets                  path=./infrastructure/secrets         prune=true dependsOn=["external-secrets-operator","openbao","prometheus"] \
   --kustomization name=grafana-operator         path=./infrastructure/grafana/operator prune=true dependsOn=["prometheus"] \
   --kustomization name=grafana                  path=./infrastructure/grafana         prune=true dependsOn=["grafana-operator","secrets"] \
-  --kustomization name=alert                    path=./infrastructure/alert           prune=true dependsOn=["prometheus","secrets"]
+  --kustomization name=alert                    path=./infrastructure/alert           prune=true dependsOn=["prometheus","secrets"] \
+  --kustomization name=cnpg-operator            path=./infrastructure/cnpg            prune=true \
+  --kustomization name=user-login-dev           path=./apps/user-login/k8s/overlays/dev prune=true dependsOn=["cnpg-operator","secrets"] \
+  --kustomization name=user-login-qa            path=./apps/user-login/k8s/overlays/qa  prune=true dependsOn=["cnpg-operator","secrets"]
 ```
 
 **Ordering matters and is expressed with `dependsOn`:**
 `prometheus` → `grafana-operator` → `grafana`; `external-secrets-operator` + `openbao` →
-`secrets` → `grafana` + `alert`. Anything that *installs* CRDs (`*-operator`, `openbao`)
-is its own Kustomization — Flux refuses to apply a Kustomization containing a CR whose
-CRD is not registered yet.
+`secrets` → `grafana` + `alert`; `cnpg-operator` → `user-login-{dev,qa}` (also on
+`secrets`). Anything that *installs* CRDs (`*-operator`, `openbao`) is its own
+Kustomization — Flux refuses to apply a Kustomization containing a CR whose CRD is not
+registered yet.
 
 ### 3.6 One-time RBAC for the new namespaces
 
 The AKS Flux extension impersonates a `flux-applier` ServiceAccount **in the namespace
 each resource lands in**, but only provisions that SA for namespaces it knows about
 (here: just `flux-system`, because no `--kustomization` sets `targetNamespace`). Our
-HelmReleases declare `metadata.namespace: monitoring | openbao | external-secrets`, so
-those need the SA too, or helm-controller fails with
+HelmReleases and app resources declare their own `metadata.namespace`, so each target
+namespace needs the SA too, or helm-/kustomize-controller fails with
 `serviceaccount "flux-applier" ... cannot list resource "secrets"`.
 
 ```bash
-for ns in monitoring openbao external-secrets nginx-dev-app-ns nginx-qa-app-ns; do
+for ns in monitoring openbao external-secrets cnpg-system \
+          nginx-dev-app-ns nginx-qa-app-ns userlogin-dev-ns userlogin-qa-ns; do
   kubectl create serviceaccount flux-applier -n "$ns" --dry-run=client -o yaml | kubectl apply -f -
   kubectl create clusterrolebinding "flux-applier-$ns" --clusterrole=cluster-admin \
     --serviceaccount="$ns:flux-applier" --dry-run=client -o yaml | kubectl apply -f -
@@ -600,10 +621,11 @@ app-password SMTP with 2-Step Verification, so it's the **sender**;
 ## 11. Tear down to save cost — and stand back up
 
 **What costs money here:** the AKS node VMs (2 × `Standard_D2s_v6`) are the bulk; then a
-Standard Load Balancer with **4 public IPs** (grafana + nginx dev + nginx qa + the
-cluster's outbound IP); one 2 Gi managed disk (`grafana-pvc`); and the AKS control plane
-if the cluster is on the *Standard* tier. If the AKS **Azure Monitor metrics add-on /
-Azure Managed Grafana** is enabled, that bills separately — this repo doesn't use it:
+Standard Load Balancer with **6 public IPs** (grafana + nginx dev/qa + user-login-ui
+dev/qa + the cluster's outbound IP); managed disks (`grafana-pvc`, `data-openbao-0`, and
+one per CNPG `Cluster` = `userlogin-db` dev + qa); and the AKS control plane if the
+cluster is on the *Standard* tier. If the AKS **Azure Monitor metrics add-on / Azure
+Managed Grafana** is enabled, that bills separately — this repo doesn't use it:
 
 ```bash
 az aks show -g san-rg -n san-dev-aks --query azureMonitorProfile -o json
@@ -664,21 +686,8 @@ reclaim policy `Delete`.)
 
 ```bash
 az aks start -g san-rg -n san-dev-aks
-# recreate the Flux config → exactly the command from §3.5
-az k8s-configuration flux create -g san-rg -c san-dev-aks -t managedClusters \
-  --name nginx-demo-config --namespace flux-system \
-  --url https://github.com/sandeshlamsal/Devops_Aks_Gitops_Grafana_Alert --branch main \
-  --kustomization name=apps                     path=./apps/nginx-demo/overlays/dev   prune=true \
-  --kustomization name=apps-qa                  path=./apps/nginx-demo/overlays/qa    prune=true \
-  --kustomization name=prometheus               path=./infrastructure/prometheus      prune=true \
-  --kustomization name=external-secrets-operator path=./infrastructure/secrets/operator prune=true \
-  --kustomization name=openbao                  path=./infrastructure/secrets/openbao prune=true \
-  --kustomization name=secrets                  path=./infrastructure/secrets         prune=true dependsOn=["external-secrets-operator","openbao","prometheus"] \
-  --kustomization name=grafana-operator         path=./infrastructure/grafana/operator prune=true dependsOn=["prometheus"] \
-  --kustomization name=grafana                  path=./infrastructure/grafana         prune=true dependsOn=["grafana-operator","secrets"] \
-  --kustomization name=alert                    path=./infrastructure/alert           prune=true dependsOn=["prometheus","secrets"]
-
-# then BOOTSTRAP OpenBao (init → unseal → KV + k8s auth → seed the 2 values):
+# recreate the Flux config (§3.5), the flux-applier RBAC (§3.6), then BOOTSTRAP OpenBao
+# (init → unseal → KV + k8s auth → policy → seed gmail-smtp / grafana-admin / userlogin-jwt):
 #   infrastructure/secrets/README.md → "Bootstrap OpenBao"
 ```
 

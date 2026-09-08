@@ -1,0 +1,43 @@
+# user-login-ui — React build served by nginx, which proxies /api to user-login-api.
+# The browser only talks to this Service (a public LoadBalancer with an Azure DNS label
+# set per overlay).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-login-ui
+  labels: { app: user-login-ui }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: user-login-ui }
+  template:
+    metadata:
+      labels: { app: user-login-ui }
+    spec:
+      containers:
+        - name: ui
+          image: user-login-ui:v1         # overlay rewrites to the ACR path + tag
+          ports:
+            - { name: http, containerPort: 80 }
+          env:
+            - name: API_HOST
+              value: user-login-api:8080
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 96Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-login-ui
+  labels: { app: user-login-ui }
+  # overlay adds annotation service.beta.kubernetes.io/azure-dns-label-name: userlogin-<env>
+spec:
+  type: LoadBalancer
+  selector: { app: user-login-ui }
+  ports:
+    - { name: http, port: 80, targetPort: http }

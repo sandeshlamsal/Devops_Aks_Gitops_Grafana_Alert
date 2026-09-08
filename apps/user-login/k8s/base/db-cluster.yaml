@@ -1,0 +1,24 @@
+# Postgres, managed by the CloudNativePG operator (infrastructure/cnpg/).
+# On bootstrap it creates database `userlogin` owned by role `appuser` and a Secret
+# `userlogin-db-app` (keys: username, password, dbname, host, port, uri, ...). The API
+# and the migrate/reset jobs read the `uri` key as DATABASE_URL.
+# Services created by CNPG: userlogin-db-rw (primary), -ro, -r.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: userlogin-db
+spec:
+  instances: 1
+  storage:
+    size: 1Gi
+  bootstrap:
+    initdb:
+      database: userlogin
+      owner: appuser
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

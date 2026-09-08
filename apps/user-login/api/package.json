@@ -1,0 +1,19 @@
+{
+  "name": "user-login-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Login API: authenticates users against Postgres, lists users",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "migrate": "node src/migrate.js",
+    "seed": "node src/seed.js"
+  },
+  "dependencies": {
+    "bcryptjs": "2.4.3",
+    "express": "4.21.2",
+    "jsonwebtoken": "9.0.2",
+    "pg": "8.13.1",
+    "prom-client": "15.1.3"
+  }
+}

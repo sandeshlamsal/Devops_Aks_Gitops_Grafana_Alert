@@ -1,0 +1,16 @@
+# qa overlay → namespace userlogin-qa-ns. Reconciled by clusters/dev/user-login-qa.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: userlogin-qa-ns
+resources:
+  - namespace.yaml
+  - ../../base
+images:
+  - name: user-login-api
+    newName: sanaksregistry.azurecr.io/user-login-api
+    newTag: v1
+  - name: user-login-ui
+    newName: sanaksregistry.azurecr.io/user-login-ui
+    newTag: v1
+patches:
+  - path: patch.yaml

@@ -1,0 +1,42 @@
+# CloudNativePG — https://cloudnative-pg.io  (Apache-2.0, CNCF sandbox).
+# Installs the operator + CRDs. `Cluster` CRs (apps/user-login/k8s/base/db-cluster.yaml)
+# then get a Postgres primary, generated credentials Secret, and rw/ro/r Services.
+# Its own Flux Kustomization ("cnpg-operator") — CRD-ordering, same as the other operators.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cnpg-system
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: cloudnative-pg
+  namespace: cnpg-system
+spec:
+  interval: 1h
+  url: https://cloudnative-pg.github.io/charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cloudnative-pg
+  namespace: cnpg-system
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: cloudnative-pg
+      version: ">=0.22.0 <1.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: cloudnative-pg
+        namespace: cnpg-system
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  values:
+    resources:
+      requests: { cpu: 25m, memory: 100Mi }
+      limits: { cpu: 200m, memory: 256Mi }
