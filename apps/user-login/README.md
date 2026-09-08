@@ -23,6 +23,26 @@ browser ──▶ user-login-ui  (React build, served by nginx)
 | `user-login-api` | `user-login-api:v1` | Node 20 + Express + `pg` + `bcryptjs` + `jsonwebtoken` | `userlogin-db-rw:5432` |
 | `userlogin-db` | CNPG default | Postgres via CloudNativePG `Cluster` CR | — |
 
+## Endpoints / FQDNs
+
+Only the UI is public (LoadBalancer + Azure DNS label). API and DB are ClusterIP —
+reach the API through the UI's `/api` proxy, or `kubectl port-forward`.
+
+| Service | dev | qa |
+|---|---|---|
+| **UI** (public, `LoadBalancer:80`) | **http://userdir-dev.eastus2.cloudapp.azure.com** | **http://userdir-qa.eastus2.cloudapp.azure.com** |
+| API — external, via UI proxy | `http://userdir-dev.eastus2.cloudapp.azure.com/api/*` | `http://userdir-qa.eastus2.cloudapp.azure.com/api/*` |
+| API — in-cluster (`ClusterIP:8080`) | `user-login-api.userlogin-dev-ns.svc.cluster.local:8080` | `user-login-api.userlogin-qa-ns.svc.cluster.local:8080` |
+| DB primary — in-cluster (`ClusterIP:5432`) | `userlogin-db-rw.userlogin-dev-ns.svc.cluster.local:5432` | `userlogin-db-rw.userlogin-qa-ns.svc.cluster.local:5432` |
+| DB read-only / any replica | `userlogin-db-ro.userlogin-dev-ns.svc.cluster.local` · `userlogin-db-r.…` | `userlogin-db-ro.userlogin-qa-ns.svc.cluster.local` · `userlogin-db-r.…` |
+
+```bash
+# API without the UI:
+kubectl -n userlogin-dev-ns port-forward svc/user-login-api 8080:8080   # → http://localhost:8080/api/healthz
+# DB shell:
+kubectl -n userlogin-dev-ns exec -it userlogin-db-1 -- psql -U appuser -d userlogin
+```
+
 ## API
 
 | Route | Auth | Returns |
