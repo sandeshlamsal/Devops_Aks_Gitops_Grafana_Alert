@@ -14,7 +14,7 @@ browser ──▶ user-login-ui  (React build, served by nginx)
                  │             migrate Job ─┘        └─ reset CronJob (suspended)
                  ▼
         LoadBalancer + Azure DNS label
-        userlogin-<env>.eastus2.cloudapp.azure.com
+        userdir-<env>.eastus2.cloudapp.azure.com
 ```
 
 | Service | Image | Tech | Talks to |
@@ -121,7 +121,7 @@ kubectl -n userlogin-dev-ns exec userlogin-db-1 -- psql -U appuser -d userlogin 
 
 # UI URL:
 kubectl get svc user-login-ui -n userlogin-dev-ns -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
-#   http://userlogin-dev.eastus2.cloudapp.azure.com  → log in as admin / password123
+#   http://userdir-dev.eastus2.cloudapp.azure.com  → log in as admin / password123
 ```
 
 ## Local dev

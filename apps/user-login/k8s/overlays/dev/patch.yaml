@@ -17,5 +17,5 @@ kind: Service
 metadata:
   name: user-login-ui
   annotations:
-    # → userlogin-dev.eastus2.cloudapp.azure.com  (stable public URL)
-    service.beta.kubernetes.io/azure-dns-label-name: userlogin-dev
+    # → userdir-dev.eastus2.cloudapp.azure.com  (stable public URL)
+    service.beta.kubernetes.io/azure-dns-label-name: userdir-dev
