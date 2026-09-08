@@ -7,8 +7,6 @@ the real values from an external store and writes native Kubernetes `Secret`s.
   `ExternalSecret` CRs and syncs.
 - **OpenBao** — MPL-2.0, Linux Foundation. The open-source fork of HashiCorp Vault; the
   secret backend. (ESO's `vault` provider talks to it unchanged.)
-- **1Password** — supported as an alternate backend (`stores/clustersecretstore-1password.yaml`),
-  off by default because it needs a 1Password Connect server + your token.
 
 ```
 OpenBao  (kv/monitoring/gmail-smtp, kv/monitoring/grafana-admin)
@@ -37,7 +35,6 @@ External Secrets Operator ── reconciles ExternalSecret CRs ──►  Secret
 | `operator/` | ESO Helm install (namespace `external-secrets`) — own Kustomization (has CRDs) |
 | `openbao/openbao.yaml` | OpenBao standalone Helm install (namespace `openbao`, file storage on a 1Gi PVC) |
 | `stores/clustersecretstore-openbao.yaml` | `ClusterSecretStore/openbao` — how ESO reaches + authenticates to OpenBao |
-| `stores/clustersecretstore-1password.yaml` | alternate `ClusterSecretStore/onepassword` — **not** in `kustomization.yaml` |
 | `externalsecrets/gmail-smtp.yaml` | `ExternalSecret` → Secret `gmail-smtp-secret` (key `password`) in `monitoring` |
 | `externalsecrets/grafana-admin.yaml` | `ExternalSecret` → Secret `grafana-admin` (key `password`) in `monitoring` |
 
@@ -119,11 +116,3 @@ kubectl describe externalsecret gmail-smtp-secret -n monitoring   # events on fa
    `target.name` to the Secret name the consumer expects.
 3. List it in `kustomization.yaml`.
 4. Commit, push, `flux reconcile kustomization nginx-demo-config-secrets -n flux-system`.
-
-## Use 1Password instead of OpenBao
-
-See the header comment in `stores/clustersecretstore-1password.yaml`. In short: run
-1Password Connect, create `onepassword-connect-token` in `external-secrets`, add that
-store file to `kustomization.yaml`, and point each `ExternalSecret`'s
-`secretStoreRef.name` at `onepassword` (with `remoteRef.key` = the 1Password item name,
-`property` = the field).

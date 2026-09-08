@@ -107,7 +107,7 @@ infrastructure/
   secrets/                    External Secrets Operator + OpenBao — no secret values in git
     operator/                 ESO Helm install — its OWN Flux Kustomization
     openbao/                  OpenBao (OSS Vault fork) Helm install — its OWN Flux Kustomization
-    stores/                   ClusterSecretStore → OpenBao (+ optional 1Password)
+    stores/                   ClusterSecretStore → OpenBao
     externalsecrets/          ExternalSecret CRs → gmail-smtp-secret, grafana-admin
   grafana/
     operator/                 the Grafana Operator Helm install — its OWN Flux Kustomization
@@ -179,7 +179,7 @@ bao kv put kv/monitoring/grafana-admin password='A_STRONG_ADMIN_PASSWORD'
 ```
 
 Update `to:` / `from:` / `authUsername:` in `infrastructure/alert/alertmanager-config.yaml`
-to your addresses. (Prefer 1Password? See `infrastructure/secrets/README.md`.)
+to your addresses.
 
 ### 3.3 Pick a DNS label for Grafana
 
@@ -354,11 +354,9 @@ Secret monitoring/gmail-smtp-secret ─► Alertmanager (SMTP auth)
 Secret monitoring/grafana-admin     ─► Grafana ($__env{GF_SECURITY_ADMIN_PASSWORD})
 ```
 
-Every secret in this system now lives only in OpenBao. Add another with one
-`bao kv put` + one `ExternalSecret` — see
+Every secret in this system lives only in OpenBao. Add another with one `bao kv put` +
+one `ExternalSecret` — see
 [`infrastructure/secrets/README.md`](infrastructure/secrets/README.md#add-a-new-secret).
-Want 1Password instead of / alongside OpenBao? Same repo, swap the `ClusterSecretStore`
-(`infrastructure/secrets/stores/`).
 
 ### 5.2 Seal / unseal — the core OpenBao concept
 
@@ -431,7 +429,7 @@ unsealed on its own — including after `az aks start`.
 
 | Area | State in this repo | Go further |
 |---|---|---|
-| Secret management | **External Secrets Operator + OpenBao** (`infrastructure/secrets/`). No secret values in git; `gmail-smtp-secret` + `grafana-admin` are synced from OpenBao via `ExternalSecret` CRs. 1Password is a drop-in alternate backend. | OpenBao HA (Raft) + **auto-unseal** (Azure Key Vault) so no manual unseal; short-lived tokens; per-app policies; audit device |
+| Secret management | **External Secrets Operator + OpenBao** (`infrastructure/secrets/`). No secret values in git; `gmail-smtp-secret` + `grafana-admin` are synced from OpenBao via `ExternalSecret` CRs. | OpenBao HA (Raft) + **auto-unseal** (Azure Key Vault) so no manual unseal; short-lived tokens; per-app policies; audit device |
 | Grafana admin password | `$__env{GF_SECURITY_ADMIN_PASSWORD}` ← Secret `grafana-admin` ← OpenBao | rotate in OpenBao (`bao kv put …`); ESO re-syncs on `refreshInterval` |
 | Gmail SMTP password | Secret `gmail-smtp-secret` ← OpenBao (was a manual `kubectl create secret`) | rotate the app password; or a real transactional-mail provider |
 | Grafana exposure | public `LoadBalancer`, HTTP :80 | ClusterIP + Ingress + TLS (§4); `spec.service.spec.loadBalancerSourceRanges` to restrict source IPs if keeping the LB |
