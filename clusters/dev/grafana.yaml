@@ -1,6 +1,6 @@
 # WHY: tells Flux to reconcile infrastructure/grafana/ — the Grafana instance +
 # Prometheus datasource + dashboards. dependsOn: grafana-operator (its CRDs must be
-# registered first; that Kustomization in turn dependsOn prometheus).
+# registered first) and secrets (the grafana-admin Secret must exist so the pod starts).
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -12,6 +12,7 @@ spec:
   prune: true
   dependsOn:
     - name: grafana-operator
+    - name: secrets
   sourceRef:
     kind: GitRepository
     name: flux-system

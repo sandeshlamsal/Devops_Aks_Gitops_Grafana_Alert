@@ -15,7 +15,10 @@ spec:
   config:
     security:
       admin_user: admin
-      admin_password: changeme123      # DEMO ONLY — the service below is a public LoadBalancer
+      # Resolved at runtime from env GF_SECURITY_ADMIN_PASSWORD, which comes from the
+      # Secret "grafana-admin" that External Secrets Operator syncs out of OpenBao
+      # (infrastructure/secrets/). Nothing sensitive in git.
+      admin_password: $__env{GF_SECURITY_ADMIN_PASSWORD}
     server:
       # Permanent shareable URL. The Azure DNS label on the Service (below) publishes
       # <label>.<region>.cloudapp.azure.com and keeps it pinned to the LB's public IP
@@ -56,6 +59,15 @@ spec:
             runAsUser: 472
             runAsGroup: 472
             fsGroup: 472
+          containers:
+            - name: grafana
+              env:
+                # admin password, synced from OpenBao by External Secrets Operator
+                - name: GF_SECURITY_ADMIN_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: grafana-admin
+                      key: password
           # The operator mounts a volume named "grafana-data" at /var/lib/grafana but
           # defaults it to emptyDir — repoint it at the PVC above so Grafana's SQLite
           # (dashboards, prefs) persists across pod restarts.

@@ -20,8 +20,10 @@ Azure-managed Grafana; our dashboards do not appear there.)
 | Prometheus backend | [`infrastructure/prometheus/README.md`](infrastructure/prometheus/README.md) |
 | Grafana + how to add dashboards + the URL/PVC | [`infrastructure/grafana/README.md`](infrastructure/grafana/README.md) |
 | Alerting + how to add rules | [`infrastructure/alert/README.md`](infrastructure/alert/README.md) |
+| Secret management (ESO + OpenBao) | [`infrastructure/secrets/README.md`](infrastructure/secrets/README.md) |
 | **Build from scratch (shareable runbook)** | [§3](#3-build-this-from-scratch--step-by-step) |
-| DNS / permanent URL · Security hardening | [§4](#4-dns--the-permanent-url) · [§5](#5-security--hardening-checklist) |
+| DNS / permanent URL | [§4](#4-dns--the-permanent-url) |
+| Secrets (OpenBao: seal/unseal, auto-unseal) · Hardening | [§5](#5-secrets--security) |
 | **Tear down to save cost / stand back up** | [§11](#11-tear-down-to-save-cost--and-stand-back-up) |
 
 ---
@@ -33,10 +35,11 @@ Azure-managed Grafana; our dashboards do not appear there.)
 | Cluster | `san-dev-aks` / RG `san-rg` / sub `bf286ce3-6142-41dc-9c9b-fd993989df20` / `eastus2` |
 | Repo | `https://github.com/sandeshlamsal/Devops_Aks_Gitops_Grafana_Alert` branch `main` |
 | Flux config | `nginx-demo-config` (AKS Flux extension, namespace `flux-system`) |
-| **Grafana URL** | **http://nginx-demo-grafana.eastus2.cloudapp.azure.com** — login `admin` / `changeme123` |
+| **Grafana URL** | **http://nginx-demo-grafana.eastus2.cloudapp.azure.com** — login `admin` / password from OpenBao (`kv/monitoring/grafana-admin`) |
 | Nginx Dashboard | `…/d/nginx-demo/nginx-dashboard` → folder **Custom Application Dashboards** |
 | App namespaces | `nginx-dev-app-ns` (2 replicas), `nginx-qa-app-ns` (1 replica) |
-| Monitoring namespace | `monitoring` (Prometheus, Alertmanager, Grafana, both operators) |
+| Monitoring namespace | `monitoring` (Prometheus, Alertmanager, Grafana, Grafana + Prometheus operators) |
+| Secrets | `external-secrets` (ESO), `openbao` (OpenBao) — secret values only in OpenBao |
 | Alert | `NginxPodRestarting` → email `parasisandesh@hotmail.com` (Gmail SMTP) |
 
 ---
@@ -58,8 +61,14 @@ Azure-managed Grafana; our dashboards do not appear there.)
         │      operator builds a Grafana Deployment + LoadBalancer Service (:80, Azure DNS
         │      label) and pushes the datasource + "Nginx Dashboard" into it via its HTTP API
         │
-        ├─ Kustomization: alert             → PrometheusRule + AlertmanagerConfig CRs   (dependsOn prometheus)
-        │      Prometheus Operator merges them into Prometheus + Alertmanager
+        ├─ Kustomization: alert             → PrometheusRule + AlertmanagerConfig CRs
+        │      (dependsOn prometheus, secrets)  Prometheus Operator merges them in
+        │
+        ├─ Kustomization: external-secrets-operator → HelmRelease external-secrets (+ CRDs)
+        ├─ Kustomization: openbao           → HelmRelease openbao  (OSS Vault fork)
+        ├─ Kustomization: secrets           → ClusterSecretStore + ExternalSecret CRs
+        │      (dependsOn external-secrets-operator, openbao, prometheus)
+        │      ESO reads OpenBao → writes Secrets gmail-smtp-secret + grafana-admin
         │
         ├─ Kustomization: apps    → apps/nginx-demo/overlays/dev  → nginx-dev-app-ns
         └─ Kustomization: apps-qa → apps/nginx-demo/overlays/qa   → nginx-qa-app-ns
@@ -71,7 +80,8 @@ Azure-managed Grafana; our dashboards do not appear there.)
                            Alertmanager ◄─ AlertmanagerConfig (route + email receiver)
                                 │ NginxPodRestarting fires
                                 ▼
-                     email via Gmail SMTP (password from a Secret) ─► recipient
+                     email via Gmail SMTP ─► recipient
+                     (SMTP password: OpenBao → ESO → Secret gmail-smtp-secret)
 ```
 
 **The operator idea, in one paragraph.** A Helm chart installs a *controller* that watches
@@ -94,6 +104,11 @@ apps/nginx-demo/
 
 infrastructure/
   prometheus/                 kube-prometheus-stack Helm install + the monitoring namespace
+  secrets/                    External Secrets Operator + OpenBao — no secret values in git
+    operator/                 ESO Helm install — its OWN Flux Kustomization
+    openbao/                  OpenBao (OSS Vault fork) Helm install — its OWN Flux Kustomization
+    stores/                   ClusterSecretStore → OpenBao (+ optional 1Password)
+    externalsecrets/          ExternalSecret CRs → gmail-smtp-secret, grafana-admin
   grafana/
     operator/                 the Grafana Operator Helm install — its OWN Flux Kustomization
     grafana.yaml              Grafana instance CR (LoadBalancer :80 + Azure DNS label + PVC)
@@ -147,19 +162,24 @@ Set the image in `apps/nginx-demo/base/deployment.yaml` if your registry differs
 image bakes in `docker/default.conf` with nginx `stub_status` enabled — the exporter
 sidecar needs it.
 
-### 3.2 Create the Gmail SMTP secret (do NOT commit it)
+### 3.2 Secrets — nothing is created by hand
 
-Alertmanager reads this to send email.
+Secret **values** never touch the repo. **External Secrets Operator** + **OpenBao** (see
+`infrastructure/secrets/`) sync them into the `gmail-smtp-secret` and `grafana-admin`
+Kubernetes Secrets that Alertmanager and Grafana consume.
+
+The only manual step is a **one-time OpenBao bootstrap** (init → unseal → enable KV +
+Kubernetes auth → seed the two values), done *after* Flux installs OpenBao in §3.6 — the
+full command block is in [`infrastructure/secrets/README.md`](infrastructure/secrets/README.md#bootstrap-openbao-one-time-after-first-install--after-any-tier--2-rebuild).
+The values you seed:
 
 ```bash
-kubectl create namespace monitoring
-kubectl create secret generic gmail-smtp-secret -n monitoring \
-  --from-literal=password='YOUR_GMAIL_APP_PASSWORD'
+bao kv put kv/monitoring/gmail-smtp    password='YOUR_GMAIL_APP_PASSWORD'
+bao kv put kv/monitoring/grafana-admin password='A_STRONG_ADMIN_PASSWORD'
 ```
 
-Referenced by `infrastructure/alert/alertmanager-config.yaml` →
-`spec.receivers[].emailConfigs[].authPassword`. Update the `to:` / `from:` /
-`authUsername:` in that file to your addresses.
+Update `to:` / `from:` / `authUsername:` in `infrastructure/alert/alertmanager-config.yaml`
+to your addresses. (Prefer 1Password? See `infrastructure/secrets/README.md`.)
 
 ### 3.3 Pick a DNS label for Grafana
 
@@ -189,27 +209,41 @@ az k8s-configuration flux create \
   -g <RG> -c <CLUSTER> -t managedClusters \
   --name nginx-demo-config --namespace flux-system \
   --url <YOUR_REPO_URL> --branch main \
-  --kustomization name=apps             path=./apps/nginx-demo/overlays/dev  prune=true \
-  --kustomization name=apps-qa          path=./apps/nginx-demo/overlays/qa   prune=true \
-  --kustomization name=prometheus       path=./infrastructure/prometheus     prune=true \
-  --kustomization name=grafana-operator path=./infrastructure/grafana/operator prune=true dependsOn=["prometheus"] \
-  --kustomization name=grafana          path=./infrastructure/grafana        prune=true dependsOn=["grafana-operator"] \
-  --kustomization name=alert            path=./infrastructure/alert          prune=true dependsOn=["prometheus"]
+  --kustomization name=apps                     path=./apps/nginx-demo/overlays/dev   prune=true \
+  --kustomization name=apps-qa                  path=./apps/nginx-demo/overlays/qa    prune=true \
+  --kustomization name=prometheus               path=./infrastructure/prometheus      prune=true \
+  --kustomization name=external-secrets-operator path=./infrastructure/secrets/operator prune=true \
+  --kustomization name=openbao                  path=./infrastructure/secrets/openbao prune=true \
+  --kustomization name=secrets                  path=./infrastructure/secrets         prune=true dependsOn=["external-secrets-operator","openbao","prometheus"] \
+  --kustomization name=grafana-operator         path=./infrastructure/grafana/operator prune=true dependsOn=["prometheus"] \
+  --kustomization name=grafana                  path=./infrastructure/grafana         prune=true dependsOn=["grafana-operator","secrets"] \
+  --kustomization name=alert                    path=./infrastructure/alert           prune=true dependsOn=["prometheus","secrets"]
 ```
 
 **Ordering matters and is expressed with `dependsOn`:**
-`prometheus` → `grafana-operator` → `grafana`; `alert` also waits on `prometheus`.
-`grafana-operator` is a **separate** Kustomization on purpose — Flux refuses to apply a
-Kustomization that contains a CR whose CRD is not registered yet, so the operator (which
-*installs* the CRDs) must land in its own unit first.
+`prometheus` → `grafana-operator` → `grafana`; `external-secrets-operator` + `openbao` →
+`secrets` → `grafana` + `alert`. Anything that *installs* CRDs (`*-operator`, `openbao`)
+is its own Kustomization — Flux refuses to apply a Kustomization containing a CR whose
+CRD is not registered yet.
 
-### 3.6 Wait for it to converge
+### 3.6 Wait, then bootstrap OpenBao
 
 ```bash
-kubectl get kustomization -n flux-system -w        # all six → READY=True, same revision
-# (names are prefixed nginx-demo-config-*)
+kubectl get kustomization -n flux-system -w        # names are prefixed nginx-demo-config-*
+kubectl get helmrelease -A                         # kube-prom-stack, grafana-operator, external-secrets, openbao
+kubectl get pods -n openbao                        # openbao-0 Running but 0/1 → it starts SEALED
+```
 
-kubectl get helmrelease -n monitoring              # kube-prom-stack + grafana-operator READY
+**`openbao` / `secrets` (and thus `grafana`, `alert`) stay not-ready until you bootstrap
+OpenBao once** — init, unseal, enable KV + Kubernetes auth, seed the two values. Full
+command block:
+[`infrastructure/secrets/README.md` → Bootstrap OpenBao](infrastructure/secrets/README.md#bootstrap-openbao-one-time-after-first-install--after-any-tier--2-rebuild).
+
+Then it converges:
+
+```bash
+kubectl get externalsecret -n monitoring          # gmail-smtp-secret, grafana-admin → SecretSynced=True
+kubectl get kustomization -n flux-system          # all → READY=True, same revision
 kubectl get pods -n monitoring                     # prometheus-*, alertmanager-*, grafana-*, *-operator-*
 kubectl get pods -n nginx-dev-app-ns               # nginx-demo 2/2 x2
 kubectl get pods -n nginx-qa-app-ns                # nginx-demo 2/2 x1
@@ -219,10 +253,10 @@ First reconcile can take a few minutes (Helm installs, image pulls, CRD registra
 `grafana` may briefly show `dry-run failed: no matches for kind "GrafanaDashboard"` until
 `grafana-operator` finishes — it self-resolves.
 
-> The `clusters/dev/*.yaml` files mirror the six Kustomizations above for readers. They
-> are **not** applied by the AKS extension (which is driven by the `az` command). On this
-> cluster the Prometheus one is named `infrastructure` for historical reasons; a fresh
-> bootstrap with the command above names it `prometheus`.
+> The `clusters/dev/*.yaml` files mirror the Kustomizations above for readers. They are
+> **not** applied by the AKS extension (which is driven by the `az` command). The very
+> first cluster named the Prometheus Kustomization `infrastructure`; the command above
+> names it `prometheus` — match `clusters/dev/` and the deep-dive READMEs.
 
 ### 3.7 Get the Grafana URL
 
@@ -292,18 +326,120 @@ behind TLS:
 
 ---
 
-## 5. Security / hardening checklist
+## 5. Secrets & security
 
-| Area | Demo state | Do this for real |
+### 5.1 Secret management with OpenBao + External Secrets Operator
+
+**Why not plain Kubernetes Secrets?** They're base64 (not encryption), readable by anyone
+who can `get secret`, live in etcd, and are one careless `kubectl apply -f` away from git.
+This repo keeps **zero secret values in version control**.
+
+**The two pieces**
+
+| | |
+|---|---|
+| **OpenBao** (`infrastructure/secrets/openbao/`) | The vault. Stores secrets encrypted at rest, with access policies, an audit log, versioning and rotation. Open-source (MPL-2.0, Linux Foundation) — the fork of HashiCorp Vault; API-compatible with it. |
+| **External Secrets Operator** (`infrastructure/secrets/operator/`) | The bridge. Reconciles `ExternalSecret` CRs: authenticates to OpenBao with its Kubernetes ServiceAccount, reads a path, and writes a normal `Secret` that apps consume. `refreshInterval` re-syncs, so rotating in OpenBao propagates automatically. |
+
+```
+ExternalSecret CR (in git, NO value)
+      │  ESO authenticates: its ServiceAccount token → OpenBao Kubernetes-auth role
+      │                     "external-secrets" → policy "eso-monitoring"
+      ▼
+OpenBao  kv/monitoring/gmail-smtp     (field: password)
+         kv/monitoring/grafana-admin  (field: password)
+      │  ESO writes native Secrets
+      ▼
+Secret monitoring/gmail-smtp-secret ─► Alertmanager (SMTP auth)
+Secret monitoring/grafana-admin     ─► Grafana ($__env{GF_SECURITY_ADMIN_PASSWORD})
+```
+
+Every secret in this system now lives only in OpenBao. Add another with one
+`bao kv put` + one `ExternalSecret` — see
+[`infrastructure/secrets/README.md`](infrastructure/secrets/README.md#add-a-new-secret).
+Want 1Password instead of / alongside OpenBao? Same repo, swap the `ClusterSecretStore`
+(`infrastructure/secrets/stores/`).
+
+### 5.2 Seal / unseal — the core OpenBao concept
+
+OpenBao encrypts all its data with an **encryption key**, and that key is itself
+encrypted by the **root key** (a.k.a. master key). On disk everything is ciphertext.
+
+When OpenBao starts it is **sealed**: it has the ciphertext but *not* the root key in
+memory, so it can decrypt nothing and every API call returns `503`.
+
+**Unsealing** reconstructs the root key in memory:
+
+```
+unseal key shares  ──(Shamir's Secret Sharing, 3-of-5)──►  root / master key
+                                                                │ decrypts
+                                                           encryption key
+                                                                │ decrypts
+                                                           your secrets (kv/…)
+```
+
+- `bao operator init` (once) generates the root key and splits it into **5 unseal key
+  shares** with a **threshold of 3**. No single share reveals anything; any 3 reconstruct
+  the root key. The shares + the initial root token are **printed once** — store the
+  shares separately (different people / vaults). Lose 3 of 5 → data is unrecoverable.
+- `bao operator unseal <share>` × 3 → OpenBao rebuilds the root key → decrypts the
+  encryption key → **unsealed**, serving.
+- A restart (pod reschedule, node reboot, `az aks stop`/`start`) **re-seals** — you unseal
+  again. This is why manual unseal doesn't scale for 24×7 systems.
+
+This repo uses **Shamir / manual unseal** because it needs nothing extra to provision.
+The one-time bootstrap is in
+[`infrastructure/secrets/README.md`](infrastructure/secrets/README.md#bootstrap-openbao-one-time-after-first-install--after-any-tier--2-rebuild).
+
+### 5.3 Auto-unseal — how the master key is protected by a KMS
+
+**Auto-unseal** removes humans from the startup path by delegating protection of the root
+key to an external KMS — **Azure Key Vault** (or AWS/GCP KMS, or another OpenBao's
+`transit` engine).
+
+- At `init`, OpenBao generates the root key and immediately asks the KMS to **wrap**
+  (encrypt) it; only the wrapped blob is written to disk. The plaintext root key is never
+  persisted.
+- On **every startup** OpenBao sends the wrapped blob to the KMS; the KMS **unwraps** it
+  using a key that never leaves the KMS/HSM; OpenBao gets the root key back in memory →
+  **auto-unsealed**, no shares, no humans.
+- Shamir shares are replaced by **recovery keys** (still 3-of-5) — used only for
+  break-glass operations (regenerate the root token, rekey), never for routine startup.
+- Trust moves to the KMS: access is gated by Azure RBAC + a managed / workload identity,
+  and the key can sit in a FIPS-140 HSM.
+
+To switch this repo to Azure Key Vault auto-unseal, replace the `server.standalone.config`
+HCL in `infrastructure/secrets/openbao/openbao.yaml` with:
+
+```hcl
+seal "azurekeyvault" {
+  tenant_id  = "<AAD_TENANT_ID>"
+  vault_name = "<KEYVAULT_NAME>"
+  key_name   = "openbao-unseal"
+  # credentials come from the pod's AKS workload identity — no client secret in config
+}
+storage "file" { path = "/openbao/data" }
+listener "tcp" { address = "[::]:8200"; tls_disable = 1 }
+```
+
+plus: a Key Vault + an RSA/AES key named `openbao-unseal`; the `Key Vault Crypto User`
+role for OpenBao's identity; AKS **workload identity** federated to OpenBao's
+ServiceAccount. Then `bao operator init` prints **recovery** keys and the pod comes up
+unsealed on its own — including after `az aks start`.
+
+### 5.4 Hardening checklist
+
+| Area | State in this repo | Go further |
 |---|---|---|
-| Grafana admin password | `changeme123` in `grafana.yaml` (plaintext) | `admin_password: $__env{GF_SECURITY_ADMIN_PASSWORD}` + a Secret (`kubectl create secret generic grafana-admin -n monitoring --from-literal=password=…`) and an `env.valueFrom.secretKeyRef` in `spec.deployment` |
-| Grafana exposure | public `LoadBalancer`, HTTP :80 | ClusterIP + Ingress + TLS (§4); restrict source IPs with `spec.service.spec.loadBalancerSourceRanges` if you must keep the LB |
-| Grafana anonymous access | off (login required) — good | keep off; wire SSO (`auth.azuread` / `auth.generic_oauth`) via `spec.config` |
-| Gmail SMTP password | Kubernetes Secret `gmail-smtp-secret` (not in git) — good | rotate the app password periodically; consider a real transactional-mail provider |
-| Alertmanager / Prometheus UIs | ClusterIP only, reachable via `port-forward` — good | keep them internal |
-| Secrets in git | none — `.gitignore` covers `.DS_Store`; SMTP + admin password are cluster-only | keep it that way; use SOPS/Sealed-Secrets if secrets ever need to live in git |
-| RBAC | Flux applies with its `flux-applier` SA (cluster-admin via the extension) | scope down with per-Kustomization service accounts if required |
-| Container security | Grafana runs as uid/gid 472 with `fsGroup: 472` (set in `grafana.yaml` so it can write its PVC) | add `readOnlyRootFilesystem`, drop capabilities, NetworkPolicies as needed |
+| Secret management | **External Secrets Operator + OpenBao** (`infrastructure/secrets/`). No secret values in git; `gmail-smtp-secret` + `grafana-admin` are synced from OpenBao via `ExternalSecret` CRs. 1Password is a drop-in alternate backend. | OpenBao HA (Raft) + **auto-unseal** (Azure Key Vault) so no manual unseal; short-lived tokens; per-app policies; audit device |
+| Grafana admin password | `$__env{GF_SECURITY_ADMIN_PASSWORD}` ← Secret `grafana-admin` ← OpenBao | rotate in OpenBao (`bao kv put …`); ESO re-syncs on `refreshInterval` |
+| Gmail SMTP password | Secret `gmail-smtp-secret` ← OpenBao (was a manual `kubectl create secret`) | rotate the app password; or a real transactional-mail provider |
+| Grafana exposure | public `LoadBalancer`, HTTP :80 | ClusterIP + Ingress + TLS (§4); `spec.service.spec.loadBalancerSourceRanges` to restrict source IPs if keeping the LB |
+| Grafana anonymous access | off (login required) | keep off; wire SSO (`auth.azuread` / `auth.generic_oauth`) via `spec.config` |
+| Alertmanager / Prometheus / OpenBao UIs | ClusterIP only, reachable via `port-forward` | keep internal |
+| Secrets in git | none — `.gitignore` covers `.DS_Store`; all secret values live in OpenBao only | if any secret ever must live in git, use SOPS or Sealed-Secrets |
+| RBAC | Flux applies with `flux-applier` (cluster-admin via the extension); ESO reads only `kv/data/monitoring/*` (OpenBao policy `eso-monitoring`) | scope Flux down with per-Kustomization service accounts |
+| Container security | Grafana runs as uid/gid 472 with `fsGroup: 472` (writes its PVC) | `readOnlyRootFilesystem`, drop capabilities, NetworkPolicies |
 
 ---
 
@@ -446,9 +582,13 @@ az aks show -g san-rg -n san-dev-aks --query azureMonitorProfile -o json
 az aks update -g san-rg -n san-dev-aks --disable-azure-monitor-metrics   # if you don't need it
 ```
 
-Pick the tier that matches how long you're pausing. **Nothing here lives only on the
-cluster except two things you must recreate on stand-up: the `gmail-smtp-secret` Secret
-and (Tier 3+) the cluster itself.** Everything else is in git and Flux rebuilds it.
+Pick the tier that matches how long you're pausing. Everything is in git and Flux
+rebuilds it. **OpenBao is the exception** — it's stateful and starts sealed:
+
+| Tier | OpenBao on stand-up |
+|---|---|
+| 1 — `az aks stop`/`start` | data + config survive on PVC `data-openbao-0`. Just **unseal** (`bao operator unseal` × 3). With Azure Key Vault auto-unseal (§5.3), nothing to do. |
+| 2+ — Flux config / cluster / RG deleted | PVC is gone → **full bootstrap** again: init → unseal → enable KV + Kubernetes auth → `bao kv put` the two values (`infrastructure/secrets/README.md`). Save the fresh unseal keys + root token. |
 
 ### Tier 1 — Pause the cluster (fastest restore, keeps everything)
 
@@ -456,13 +596,18 @@ and (Tier 3+) the cluster itself.** Everything else is in git and Flux rebuilds 
 az aks stop -g san-rg -n san-dev-aks           # ~2-3 min; stops VM compute billing
 ```
 
-Still billed: the 4 public IPs, the managed disk, control-plane (if Standard tier).
-Dashboards, Flux config, PVC data — all preserved.
+Still billed: the 4 public IPs, the managed disks (incl. `data-openbao-0`), control-plane
+(if Standard tier). Dashboards, Flux config, PVC data, OpenBao data — all preserved.
 
 **Stand up:**
 
 ```bash
 az aks start -g san-rg -n san-dev-aks          # ~5 min
+# OpenBao comes back SEALED — unseal it (skip if using Key Vault auto-unseal):
+kubectl -n openbao exec -it openbao-0 -- sh -c \
+  'BAO_ADDR=http://127.0.0.1:8200 bao operator unseal <KEY_1>; \
+   BAO_ADDR=http://127.0.0.1:8200 bao operator unseal <KEY_2>; \
+   BAO_ADDR=http://127.0.0.1:8200 bao operator unseal <KEY_3>'
 kubectl get kustomization -n flux-system -w    # Flux reconciles everything back
 ```
 
@@ -484,27 +629,29 @@ az aks stop -g san-rg -n san-dev-aks
 ```
 
 Still billed: control-plane (if Standard), the cluster's 1 outbound IP, ~nothing else.
-(The `grafana-pvc` disk is deleted with the `monitoring` namespace unless its
-`persistentVolumeReclaimPolicy` is `Retain` — it's `Delete` here.)
+(The `grafana-pvc` and `data-openbao-0` disks are deleted with their namespaces —
+reclaim policy `Delete`.)
 
 **Stand up:**
 
 ```bash
 az aks start -g san-rg -n san-dev-aks
-# recreate the SMTP secret (it was namespace-scoped and got pruned):
-kubectl create namespace monitoring
-kubectl create secret generic gmail-smtp-secret -n monitoring \
-  --from-literal=password='YOUR_GMAIL_APP_PASSWORD'
 # recreate the Flux config → exactly the command from §3.5
 az k8s-configuration flux create -g san-rg -c san-dev-aks -t managedClusters \
   --name nginx-demo-config --namespace flux-system \
   --url https://github.com/sandeshlamsal/Devops_Aks_Gitops_Grafana_Alert --branch main \
-  --kustomization name=apps             path=./apps/nginx-demo/overlays/dev  prune=true \
-  --kustomization name=apps-qa          path=./apps/nginx-demo/overlays/qa   prune=true \
-  --kustomization name=prometheus       path=./infrastructure/prometheus     prune=true \
-  --kustomization name=grafana-operator path=./infrastructure/grafana/operator prune=true dependsOn=["prometheus"] \
-  --kustomization name=grafana          path=./infrastructure/grafana        prune=true dependsOn=["grafana-operator"] \
-  --kustomization name=alert            path=./infrastructure/alert          prune=true dependsOn=["prometheus"]
+  --kustomization name=apps                     path=./apps/nginx-demo/overlays/dev   prune=true \
+  --kustomization name=apps-qa                  path=./apps/nginx-demo/overlays/qa    prune=true \
+  --kustomization name=prometheus               path=./infrastructure/prometheus      prune=true \
+  --kustomization name=external-secrets-operator path=./infrastructure/secrets/operator prune=true \
+  --kustomization name=openbao                  path=./infrastructure/secrets/openbao prune=true \
+  --kustomization name=secrets                  path=./infrastructure/secrets         prune=true dependsOn=["external-secrets-operator","openbao","prometheus"] \
+  --kustomization name=grafana-operator         path=./infrastructure/grafana/operator prune=true dependsOn=["prometheus"] \
+  --kustomization name=grafana                  path=./infrastructure/grafana         prune=true dependsOn=["grafana-operator","secrets"] \
+  --kustomization name=alert                    path=./infrastructure/alert           prune=true dependsOn=["prometheus","secrets"]
+
+# then BOOTSTRAP OpenBao (init → unseal → KV + k8s auth → seed the 2 values):
+#   infrastructure/secrets/README.md → "Bootstrap OpenBao"
 ```
 
 ### Tier 3 — Delete the cluster (keep RG, ACR, repo)
