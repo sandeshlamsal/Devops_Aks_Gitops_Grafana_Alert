@@ -10,38 +10,68 @@ It exists because "the app emits telemetry" and "you can see the app's telemetry
 Grafana" are different claims — this proves the second one, locally, with your own eyes,
 first.
 
-## 1. The three flows, and every component in each one
+## 1. Architecture — every component, and why it exists
+
+Four stages, always: **emit → ship → store → view**. Metrics collapse "ship" into the
+storage step (Prometheus pulls directly); logs and traces each need a dedicated shipper
+because the app never talks to Loki/Tempo itself — it only ever writes to stdout or to
+the OTel SDK.
 
 ```mermaid
 flowchart LR
-    subgraph App["user-management-app-api container"]
-        H["/api/login, /api/users,\n/api/healthz handlers"]
-        M["prom-client\n(/metrics endpoint)"]
-        L["logger.js\n(JSON to stdout)"]
-        T["tracing.js\n(OTel SDK + auto-instrumentation)"]
+    subgraph EMIT["user-management-app-api container"]
+        direction TB
+        PC["prom-client\ncounters/histograms"]
+        LG["logger.js\nJSON line to stdout"]
+        TR["tracing.js\nOTel SDK, auto-instrumented"]
     end
 
-    H --> M
-    H --> L
-    H --> T
+    subgraph SHIP["shippers — pull or push telemetry into storage"]
+        direction TB
+        AL["Grafana Alloy\ntails container stdout\nvia docker.sock"]
+        OC["OTel Collector\nreceives OTLP,\nbatches, forwards"]
+    end
 
-    M -- "scraped by" --> PROM[(Prometheus)]
-    L -- "tailed via docker.sock" --> ALLOY[Grafana Alloy]
-    ALLOY -- "push" --> LOKI[(Loki)]
-    T -- "OTLP/HTTP :4318" --> OTEL[OTel Collector]
-    OTEL -- "OTLP/gRPC :4317" --> TEMPO[(Tempo)]
+    subgraph STORE["storage — index + retain each signal"]
+        direction TB
+        PR[("Prometheus\nTSDB")]
+        LK[("Loki\nlog index")]
+        TE[("Tempo\ntrace index")]
+    end
 
-    PROM --> GRAF[Grafana]
-    LOKI --> GRAF
-    TEMPO --> GRAF
+    UI["Grafana\n:3000"]
+    U(["you, in a browser"])
+
+    PC -- "GET :8080/metrics\nscraped every 5s" --> PR
+    LG -- "stdout" --> AL
+    AL -- "push, HTTP" --> LK
+    TR -- "OTLP/HTTP :4318" --> OC
+    OC -- "OTLP/gRPC :4317" --> TE
+
+    PR -- "PromQL" --> UI
+    LK -- "LogQL" --> UI
+    TE -- "TraceQL / trace ID" --> UI
+    UI -- "renders dashboards,\nExplore, trace view" --> U
 ```
 
-| Signal  | App-side component | Transport component(s) | Storage | Component role |
-|---|---|---|---|---|
-| **Metrics** | `prom-client` in `server.js` — counts/histograms exposed on `GET /metrics` | *(none — pulled directly)* | **Prometheus** (`prometheus:v3.14.0`) — scrapes `api:8080/metrics` every 5s | Prometheus is both the transport (scrape) and the storage/query engine for metrics |
-| **Logs** | `api/src/logger.js` — one JSON object per line to stdout, tagged with the active `trace_id`/`span_id` | **Grafana Alloy** — tails every container's stdout via the Docker socket, parses the JSON, ships to Loki | **Loki** — stores + indexes log lines | Alloy is *only* a shipper (no storage, no UI); Loki is *only* storage/query (no UI); replaces the older "Promtail" agent |
-| **Traces** | `api/src/tracing.js` — OpenTelemetry Node SDK, auto-instruments Express + `pg`, exports spans over OTLP/HTTP | **OpenTelemetry Collector** — receives OTLP, batches, forwards to Tempo over OTLP/gRPC | **Tempo** — stores + indexes traces | The Collector is a swappable ingestion gateway (today: fan-out to Tempo only; same slot the AKS setup also plans to fan metrics through, see `infrastructure/observability/otel-collector.yaml`) |
-| **All three** | — | — | — | **Grafana** — the one UI that queries Prometheus (PromQL), Loki (LogQL) and Tempo (TraceQL), and jumps between a log line and its trace |
+### Why each one is needed — what breaks if you remove it
+
+| Component | Job | Remove it and… |
+|---|---|---|
+| **`prom-client`** (in `server.js`) | Counts requests, times them, exposes the numbers as text on `GET /metrics` | No numbers exist anywhere. Prometheus has nothing to scrape. |
+| **`logger.js`** | Writes one JSON line per request to stdout, tagged with the request's `trace_id` | Logs would still exist (Express/Node print *something*), but unstructured and with no `trace_id` — you'd never be able to jump from a log line to its trace. |
+| **`tracing.js`** (OTel SDK) | Auto-wraps Express and `pg` calls in spans, exports them | No spans are ever created. There is nothing for the Collector or Tempo to receive — traces don't exist without this, full stop. |
+| **Prometheus** | Pulls `/metrics` on a timer, stores the time series, answers PromQL | Without it, the numbers `prom-client` computes just sit in the container and vanish every 5 seconds — nothing persists or queries them. |
+| **Grafana Alloy** | The only thing that can reach the log lines — tails every container's stdout via the Docker socket, parses the JSON, pushes to Loki | The app **cannot** push logs to Loki itself (it only knows how to `console.log`). Without a shipper, stdout logs stay trapped inside `docker logs <container>` and never reach any queryable store. |
+| **Loki** | Indexes and stores log lines so they're searchable by label/text later | Without it, Alloy has nowhere to push to — logs would only ever be visible one container at a time via `docker compose logs`, not searchable, not correlated with traces. |
+| **OpenTelemetry Collector** | Receives OTLP spans from the app, batches them, forwards to Tempo | The OTel SDK exports spans over the network on a timer/batch — it needs *something* listening on 4317/4318. Removing the Collector means every export call fails silently and no span ever reaches storage. (It's also the seam where you'd later fan metrics or logs through OTLP too, without touching app code again.) |
+| **Tempo** | Indexes and stores trace spans by trace ID, answers TraceQL | Without it, the Collector has nowhere to forward to — spans would be generated and exported, then dropped with nowhere to land. |
+| **Grafana** | The one UI on top of all three stores — PromQL against Prometheus, LogQL against Loki, TraceQL against Tempo, and the log↔trace jump link | Without it, every signal above still technically "works," but you'd be back to `curl`-ing raw APIs by hand (exactly what we did in §4's fallback) instead of a browsable UI. This is the component that turns "data exists somewhere" into "a person can actually look at it." |
+
+The common thread: **the app can produce all three signals on its own, but it can't
+store, index, correlate, or display any of them.** Every component past `tracing.js` /
+`logger.js` / `prom-client` exists to do one of those four jobs — take one away and that
+job just doesn't happen for that signal.
 
 Every one of these runs as a plain container in `docker-compose.yml` locally, and as a
 Flux-managed `HelmRelease` in `infrastructure/observability/*.yaml` on AKS — same
