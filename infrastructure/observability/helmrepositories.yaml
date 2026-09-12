@@ -1,0 +1,21 @@
+# Chart sources for the observability stack: Loki + Tempo + Alloy (Grafana Labs) and
+# the OpenTelemetry Collector (CNCF). None of these charts ship CRDs, so — unlike
+# grafana-operator/cnpg/external-secrets — they don't need their own Flux Kustomization
+# for ordering; everything here can be one unit.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: grafana-charts
+  namespace: monitoring
+spec:
+  interval: 1h
+  url: https://grafana.github.io/helm-charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: open-telemetry
+  namespace: monitoring
+spec:
+  interval: 1h
+  url: https://open-telemetry.github.io/opentelemetry-helm-charts

@@ -1,0 +1,42 @@
+# Grafana Tempo — traces. Single-binary, local (PVC) storage — the OTel Collector
+# (otel-collector.yaml) forwards every trace it receives here over OTLP gRPC. Grafana
+# queries it via the "Tempo" GrafanaDatasource (datasource-tempo.yaml), which also wires
+# trace→logs (Loki) and trace→metrics (Prometheus) correlation.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tempo
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: tempo
+      version: ">=1.10.0 <2.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana-charts
+        namespace: monitoring
+  values:
+    tempo:
+      retention: 168h   # 7 days
+      storage:
+        trace:
+          backend: local
+          local:
+            path: /var/tempo/traces
+          wal:
+            path: /var/tempo/wal
+      receivers:
+        otlp:
+          protocols:
+            grpc: {}
+            http: {}
+    persistence:
+      enabled: true
+      size: 5Gi
+    resources:
+      requests: { cpu: 50m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+    serviceMonitor:
+      enabled: false

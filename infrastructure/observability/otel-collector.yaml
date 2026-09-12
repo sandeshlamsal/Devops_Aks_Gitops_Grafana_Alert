@@ -1,0 +1,82 @@
+# The single ingestion point: user-management-app-api sends OTLP traces here
+# (OTEL_EXPORTER_OTLP_ENDPOINT, set in apps/user-management-app/k8s/base/api.yaml).
+# The collector fans out: traces -> Tempo (OTLP gRPC), and re-exposes anything sent on
+# the metrics pipeline as a Prometheus-scrapable endpoint (unused today — the API still
+# exposes /metrics directly via prom-client — but wired for any service that later
+# prefers to emit OTLP metrics instead of hosting its own /metrics).
+# Needs the "contrib" image for the `prometheus` exporter (not in the core collector).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: otel-collector
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: opentelemetry-collector
+      version: ">=0.100.0 <1.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: open-telemetry
+        namespace: monitoring
+  values:
+    mode: deployment
+    replicaCount: 1
+    image:
+      repository: otel/opentelemetry-collector-contrib
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 300m, memory: 256Mi }
+    ports:
+      metrics:
+        enabled: true
+        containerPort: 8889
+        servicePort: 8889
+        protocol: TCP
+    config:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: "0.0.0.0:4317"
+            http:
+              endpoint: "0.0.0.0:4318"
+      processors:
+        batch: {}
+      exporters:
+        otlp/tempo:
+          endpoint: "tempo.monitoring.svc:4317"
+          tls:
+            insecure: true
+        prometheus:
+          endpoint: "0.0.0.0:8889"
+      service:
+        pipelines:
+          traces:
+            receivers: [otlp]
+            processors: [batch]
+            exporters: [otlp/tempo]
+          metrics:
+            receivers: [otlp]
+            processors: [batch]
+            exporters: [prometheus]
+          logs: null   # not used — logs go via Grafana Alloy -> Loki instead, see alloy.yaml
+---
+# Prometheus scrapes the collector's own re-exported metrics endpoint, same
+# operator-discovery pattern used everywhere else in this repo.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: otel-collector
+  namespace: monitoring
+  labels: { release: kube-prom-stack }
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/name: opentelemetry-collector }
+  namespaceSelector:
+    matchNames: [monitoring]
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
