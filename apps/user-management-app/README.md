@@ -167,6 +167,11 @@ wired entirely through `.env` (see `.env.example` — the table there maps every
 its AKS equivalent: `DATABASE_URL`, `JWT_SECRET`, `APP_ENV`, `API_HOST`). Promoting to a
 cluster only ever changes *where the value comes from*, never the app.
 
+The same `docker compose up` also brings up a full local observability stack —
+Prometheus, Loki+Alloy, Tempo, and a real Grafana at http://localhost:3000 — so you can
+see your own metrics, logs, and traces before any of it goes near AKS. Guided
+walkthrough, real captured examples: **[docs/local-observability.md](docs/local-observability.md)**.
+
 ---
 
 ## Build the images

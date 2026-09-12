@@ -1,0 +1,71 @@
+// Local-only Grafana Alloy config for docker-compose.yml. Discovers every container on
+// the compose project via the Docker socket and tails its stdout/stderr — the exact same
+// job the AKS DaemonSet (infrastructure/observability/alloy.yaml, not yet written) does
+// by tailing container log files on each node instead of the Docker socket. Point of
+// this file: prove the log -> Loki -> Grafana path end to end before building that.
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  // discovery.docker sees EVERY container on the whole Docker daemon, not just this
+  // compose project's — on a machine with other stuff running (a k3d cluster, another
+  // project) that means shipping unrelated containers' logs into Loki too. Keep only
+  // this project's containers (compose sets this label on every container it creates;
+  // the value is the project name, i.e. the directory name unless overridden).
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "user-management-app"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "default" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  labels     = { service = "docker" }
+  forward_to = [loki.process.json.receiver]
+}
+
+// api/src/logger.js writes one JSON object per log line. Pull `level` out as an indexed
+// label (low cardinality — fine to index) and trace_id/span_id out as *structured
+// metadata* (NOT a label — trace ids are high-cardinality, indexing them would be a real
+// production mistake). Structured metadata is still queryable and is what
+// grafana-datasources.yaml's derived field uses to build the "View Trace" link.
+loki.process "json" {
+  forward_to = [loki.write.default.receiver]
+
+  stage.json {
+    expressions = {
+      level    = "level",
+      trace_id = "trace_id",
+      span_id  = "span_id",
+    }
+  }
+
+  stage.labels {
+    values = { level = "" }
+  }
+
+  stage.structured_metadata {
+    values = {
+      trace_id = "trace_id",
+      span_id  = "span_id",
+    }
+  }
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

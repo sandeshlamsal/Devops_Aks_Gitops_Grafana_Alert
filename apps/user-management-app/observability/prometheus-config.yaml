@@ -1,0 +1,10 @@
+# Local-only raw Prometheus config for docker-compose.yml — scrapes the same /metrics
+# endpoint the real ServiceMonitor (k8s/base/api.yaml) scrapes on AKS, just via static
+# config instead of Prometheus-Operator service discovery.
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: user-management-app-api
+    static_configs:
+      - targets: ["api:8080"]

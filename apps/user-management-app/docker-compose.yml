@@ -1,12 +1,16 @@
 # Local Docker Desktop test rig — the same 3 containers AKS runs (db / api / ui),
 # built from the exact Dockerfiles used for the real images, wired with the exact env
-# var names the k8s manifests set. See ../README.md (this file's sibling) for the
-# full local-test walkthrough. NOT used by Flux/AKS — that's k8s/base + k8s/overlays.
+# var names the k8s manifests set, PLUS a local LGTM-style observability stack
+# (otel-collector / tempo / loki / alloy / grafana) so you can see real logs and traces
+# in a real Grafana UI before any of it goes near AKS. See ../README.md and
+# ../docs/local-observability.md for the full walkthrough. NOT used by Flux/AKS — that's
+# k8s/base + k8s/overlays + infrastructure/observability.
 #
 #   docker compose up --build -d
 #   docker compose logs -f migrate      # watch migrations + fixtures apply
-#   open http://localhost:8081          # log in admin / password123
-#   docker compose down -v              # stop + wipe the local db volume
+#   open http://localhost:8081          # app — log in admin / password123
+#   open http://localhost:3000          # Grafana (admin / admin) — Explore -> Loki/Tempo
+#   docker compose down -v              # stop + wipe all local volumes
 services:
   db:
     image: postgres:16
@@ -39,16 +43,23 @@ services:
     env_file: .env
     environment:
       PORT: "8080"
+      # Overrides the commented-out example in .env.example — always on for this compose
+      # rig so the whole point of it (see traces locally) works without extra setup.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
     ports:
       - "8080:8080"
     depends_on:
       migrate:
         condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8080/api/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 5s
       timeout: 3s
       retries: 10
+    # Docker's own JSON-file log driver is what alloy (below) reads via the docker
+    # socket — nothing app-side to configure, api/src/logger.js already writes JSON.
 
   ui:
     build: ./ui
@@ -60,5 +71,78 @@ services:
       api:
         condition: service_healthy
 
+  # --- local observability stack: otel-collector -> tempo (traces) / alloy -> loki (logs)
+  # -> grafana. Same 3-hop shape the AKS HelmReleases in infrastructure/observability/
+  # build, just running as plain containers instead of in-cluster Helm charts. See
+  # ../docs/local-observability.md for the guided walkthrough.
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.112.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    depends_on:
+      tempo:
+        condition: service_started
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./observability/tempo-config.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+
+  loki:
+    image: grafana/loki:3.2.1
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./observability/loki-config.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+
+  # Tails every container's stdout via the Docker socket and ships JSON logs to Loki —
+  # the local stand-in for the AKS DaemonSet that tails node-level container log files.
+  alloy:
+    image: grafana/alloy:v1.4.3
+    command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "/etc/alloy/config.alloy"]
+    volumes:
+      - ./observability/alloy-config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      loki:
+        condition: service_started
+
+  # Scrapes the api's existing /metrics endpoint (prom-client) — same data the AKS
+  # ServiceMonitor scrapes, just via static config instead of Prometheus-Operator
+  # discovery. Not required for logs/traces, included so all 3 signals are viewable in
+  # the one local Grafana.
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    command: ["--config.file=/etc/prometheus/prometheus.yaml"]
+    volumes:
+      - ./observability/prometheus-config.yaml:/etc/prometheus/prometheus.yaml:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./observability/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+    depends_on:
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
+      prometheus:
+        condition: service_started
+
 volumes:
   db-data:
+  tempo-data:
+  loki-data:

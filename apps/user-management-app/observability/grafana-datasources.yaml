@@ -1,0 +1,45 @@
+# Grafana file-based provisioning (mounted into /etc/grafana/provisioning/datasources)
+# for the local docker-compose.yml stack. Wires the trace<->log correlation that's the
+# whole point of this demo:
+#   - Loki datasource: a derivedField turns a logged `trace_id` into a "View Trace" link
+#     that opens straight into Tempo (log -> trace).
+#   - Tempo datasource: tracesToLogsV2 builds a Loki query from the trace's own traceID
+#     so a trace view has a "Logs for this span" link (trace -> log).
+# infrastructure/observability/datasource-{loki,tempo}.yaml (not yet written) will be the
+# GrafanaDashboard-operator equivalent of this file for the real AKS Grafana instance.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: false
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: false
+    jsonData:
+      derivedFields:
+        # datasourceUid pointing at a tracing datasource (not `url`) is what makes
+        # Grafana treat the captured group as a trace ID and open it in Tempo directly.
+        - datasourceUid: tempo
+          matcherRegex: '"trace_id":"(\w+)"'
+          name: TraceID
+
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    isDefault: true
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-1h"
+        spanEndTimeShift: "1h"
+        filterByTraceID: true
+        customQuery: false

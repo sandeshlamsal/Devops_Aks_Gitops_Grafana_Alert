@@ -1,0 +1,32 @@
+# Local-only raw Loki config for docker-compose.yml (the `grafana/loki` image reads this
+# directly). Same shape (filesystem storage, TSDB) as the AKS HelmRelease
+# (infrastructure/observability/loki.yaml), just not wrapped in Helm chart values.
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: "2024-01-01"
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  retention_period: 168h
+  allow_structured_metadata: true

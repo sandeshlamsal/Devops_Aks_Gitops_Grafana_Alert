@@ -1,0 +1,26 @@
+# Local-only raw Tempo config for docker-compose.yml (the `grafana/tempo` image reads
+# this directly). Same storage shape (local backend) as the AKS HelmRelease
+# (infrastructure/observability/tempo.yaml), just not wrapped in Helm chart values.
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/traces
+    wal:
+      path: /var/tempo/wal
+
+compactor:
+  compaction:
+    block_retention: 168h   # 7 days, matches the AKS config

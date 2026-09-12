@@ -8,6 +8,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const client = require("prom-client");
 const { pool } = require("./db");
+const log = require("./logger");
 
 const PORT = process.env.PORT || 8080;
 const JWT_SECRET = process.env.JWT_SECRET || "dev-only-insecure-secret";
@@ -25,9 +26,19 @@ const httpHist = new client.Histogram({
 });
 app.use((req, res, next) => {
   const end = httpHist.startTimer();
-  res.on("finish", () =>
-    end({ method: req.method, route: req.route ? req.route.path : req.path, status: res.statusCode })
-  );
+  const startedAt = Date.now();
+  res.on("finish", () => {
+    const route = req.route ? req.route.path : req.path;
+    end({ method: req.method, route, status: res.statusCode });
+    // One structured log line per request, tagged with the active trace_id — this is
+    // the line you'll find in Grafana's Explore (Loki) and jump from into Tempo.
+    log.info("request", {
+      method: req.method,
+      route,
+      status: res.statusCode,
+      duration_ms: Date.now() - startedAt,
+    });
+  });
   next();
 });
 
@@ -53,7 +64,7 @@ app.post("/api/login", async (req, res) => {
     const token = jwt.sign({ sub: user.id, username: user.username }, JWT_SECRET, { expiresIn: "1h" });
     res.json({ token });
   } catch (err) {
-    console.error("login error", err);
+    log.error("login error", { error: err.message });
     res.status(500).json({ error: "internal error" });
   }
 });
@@ -77,7 +88,7 @@ app.get("/api/users", auth, async (_req, res) => {
     );
     res.json(rows);
   } catch (err) {
-    console.error("users error", err);
+    log.error("users error", { error: err.message });
     res.status(500).json({ error: "internal error" });
   }
 });
