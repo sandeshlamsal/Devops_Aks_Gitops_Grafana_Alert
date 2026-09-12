@@ -51,8 +51,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git rev-parse "${{ steps.v.outputs.version }}" >/dev/null 2>&1; then
-            echo "tag ${{ steps.v.outputs.version }} already exists, not re-creating"
+          # actions/checkout's default shallow clone doesn't fetch tags, so checking a
+          # LOCAL ref (`git rev-parse`) is always a false negative here — check the
+          # remote directly instead.
+          if git ls-remote --exit-code --tags origin "refs/tags/${{ steps.v.outputs.version }}" >/dev/null 2>&1; then
+            echo "tag ${{ steps.v.outputs.version }} already exists on origin, not re-creating"
           else
             git tag -a "${{ steps.v.outputs.version }}" -m "release ${{ steps.v.outputs.version }}"
             git push origin "${{ steps.v.outputs.version }}"
