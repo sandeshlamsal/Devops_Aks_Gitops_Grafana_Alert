@@ -8,6 +8,43 @@ record of those. Newest first. Each entry: what broke, root cause, the fix, the 
 
 ---
 
+## 2026-09-12 — `release.yml`'s tag-push trigger can't OIDC-authenticate (immutable subject claim)
+
+**Where:** `release.yml` / `promote-*.yml`, any `azure/login@v2` step, first real
+`workflow_dispatch` run.
+
+**Symptom:**
+```
+AADSTS700213: No matching federated identity record found for presented assertion
+subject 'repo:sandeshlamsal@15390989/Devops_Aks_Gitops_Grafana_Alert@1358469180:ref:refs/heads/main'.
+```
+
+**Root cause:** this repo has `use_immutable_subject: true` set on its OIDC subject
+claim (`gh api repos/OWNER/REPO/actions/oidc/customization/sub`) — GitHub now embeds
+the numeric owner/repo IDs in the subject by default, not just the slug. The federated
+credentials registered on the Azure AD app used the classic
+`repo:owner/repo:ref:refs/heads/main` format, which no longer matches. Attempting to
+flip `use_immutable_subject` back to `false` via the API returns 200 but has no effect
+— it's enforced at a higher (account) level than a per-repo API call can override.
+
+**Fix:** updated both federated credentials' `subject` to the real immutable format
+(`repo:sandeshlamsal@15390989/Devops_Aks_Gitops_Grafana_Alert@1358469180:ref:...` /
+`:environment:production`) via `az ad app federated-credential update`.
+
+**Separately, and independent of the above:** even with the subject fixed, a real `git
+tag vX.Y.Z && git push --tags` still can't work on this tenant, because each tag
+produces a distinct subject (`ref:refs/tags/vX.Y.Z`) that no single fixed credential
+can match. Reworked `release.yml` to trigger via `workflow_dispatch` (ref
+`refs/heads/main` when dispatched from main, which does match) and have the job create
++ push the real tag itself as its first step — see `release.yml`'s own header comment
+for the full explanation. `README.md` and `docs/operations-runbook.md` updated to stop
+telling people to cut a release via a manual tag push.
+
+**Commits:** federated-credential subjects updated live (not a git change); workflow
+rework in `58b2a72`.
+
+---
+
 ## 2026-09-12 — Self-correction: don't seed Flux's git credential from a personal token
 
 **Where:** `kv/flux/git-credentials` in OpenBao (used by the `flux-image-updater`
