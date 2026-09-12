@@ -23,15 +23,15 @@ spec:
       # Permanent shareable URL. The Azure DNS label on the Service (below) publishes
       # <label>.<region>.cloudapp.azure.com and keeps it pinned to the LB's public IP
       # even if the Service is recreated.
-      domain: "nginx-demo-grafana.eastus2.cloudapp.azure.com"
-      root_url: "http://nginx-demo-grafana.eastus2.cloudapp.azure.com/"
+      domain: "usermgmt-grafana.eastus2.cloudapp.azure.com"
+      root_url: "http://usermgmt-grafana.eastus2.cloudapp.azure.com/"
   service:
     # Public LoadBalancer with a stable Azure-managed hostname, listening on :80 so the
     # URL has no port suffix. For anything real: Secret-backed admin_password, and put
     # TLS/auth in front (ClusterIP + Ingress + cert-manager) — see the folder README.
     metadata:
       annotations:
-        service.beta.kubernetes.io/azure-dns-label-name: "nginx-demo-grafana"
+        service.beta.kubernetes.io/azure-dns-label-name: "usermgmt-grafana"
     spec:
       type: LoadBalancer
       ports:

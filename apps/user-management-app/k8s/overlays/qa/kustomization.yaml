@@ -1,0 +1,18 @@
+# qa overlay → namespace user-management-app-qa-ns. Reconciled by clusters/dev/user-management-app-qa.yaml.
+# newTag here is bumped only by the release PR the CI "release" workflow opens when you
+# push a git tag (or by hand) — NOT by Flux image automation. No $imagepolicy markers.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: user-management-app-qa-ns
+resources:
+  - namespace.yaml
+  - ../../base
+images:
+  - name: user-management-app-api
+    newName: sanaksregistry.azurecr.io/user-management-app-api
+    newTag: v1
+  - name: user-management-app-ui
+    newName: sanaksregistry.azurecr.io/user-management-app-ui
+    newTag: v1
+patches:
+  - path: patch.yaml

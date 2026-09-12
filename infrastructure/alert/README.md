@@ -15,14 +15,14 @@ Reconciled by the **`alert`** Flux Kustomization (path `./infrastructure/alert`)
 
 | Path | Kind | Purpose |
 |---|---|---|
-| `rules/nginx-restarts.yaml` | `PrometheusRule` | **NginxPodRestarting** — the alert expression |
+| `rules/api-restarts.yaml` | `PrometheusRule` | **UserManagementAppPodRestarting** — the alert expression |
 | `alertmanager-config.yaml` | `AlertmanagerConfig` | routing tree + the `email` receiver (Gmail SMTP) |
 | `kustomization.yaml` | Kustomization | lists `alertmanager-config.yaml` + every file in `rules/` |
 
 ### How a rule reaches Prometheus / Alertmanager
 
 ```
-rules/nginx-restarts.yaml  (PrometheusRule, label release: kube-prom-stack)
+rules/api-restarts.yaml  (PrometheusRule, label release: kube-prom-stack)
       │  Prometheus Operator selects it (chart's ruleSelector) and writes it into Prometheus
       ▼
 Prometheus  evaluates `expr` every `interval`; when true for `for:` → alert = firing
@@ -40,27 +40,23 @@ parasisandesh@hotmail.com
 — that's what the chart's default rule selector matches.
 
 **SMTP transport** lives in the receiver (`smarthost`, `authUsername`, `authPassword`).
-The password is **not** in git — it's a Secret:
-
-```bash
-kubectl create secret generic gmail-smtp-secret -n monitoring \
-  --from-literal=password='YOUR_GMAIL_APP_PASSWORD'
-```
+The password is **not** in git — it's a Secret, synced from OpenBao via ESO (see
+`infrastructure/secrets/`), not created by hand.
 
 ---
 
 ## The current alert
 
-`NginxPodRestarting` (`rules/nginx-restarts.yaml`):
+`UserManagementAppPodRestarting` (`rules/api-restarts.yaml`):
 
 ```promql
-increase(kube_pod_container_status_restarts_total{container="nginx-demo", pod=~"nginx-demo-.*"}[5m]) > 0
+increase(kube_pod_container_status_restarts_total{container=~"api|ui", pod=~"user-management-app-.*"}[5m]) > 0
 ```
 
 `for: 1m`, `severity: warning`. **Namespace-agnostic on purpose** — it matches the
-nginx-demo workload by container/pod name, so `dev`, `qa`, and any future namespace are
-covered with no change here. The firing alert carries the real `namespace` label;
-Alertmanager groups by `alertname` + `namespace`.
+`api`/`ui` containers of user-management-app by name, so `dev`, `qa`, `prod`, and any
+future namespace are covered with no change here. The firing alert carries the real
+`namespace` label; Alertmanager groups by `alertname` + `namespace`.
 
 ---
 
@@ -69,7 +65,7 @@ Alertmanager groups by `alertname` + `namespace`.
 1. **Copy an existing file:**
 
    ```bash
-   cp infrastructure/alert/rules/nginx-restarts.yaml infrastructure/alert/rules/nginx-5xx.yaml
+   cp infrastructure/alert/rules/api-restarts.yaml infrastructure/alert/rules/api-5xx.yaml
    ```
 
 2. **Edit it** — `metadata.name`, the `alert:` name, `expr`, `for`, `labels.severity`,
@@ -80,23 +76,23 @@ Alertmanager groups by `alertname` + `namespace`.
    apiVersion: monitoring.coreos.com/v1
    kind: PrometheusRule
    metadata:
-     name: nginx-5xx
+     name: api-5xx
      namespace: monitoring
      labels:
        release: kube-prom-stack
    spec:
      groups:
-       - name: nginx-demo
+       - name: user-management-app
          rules:
-           - alert: NginxHigh5xxRate
+           - alert: ApiHigh5xxRate
              expr: |
-               sum(rate(nginx_http_requests_total{status=~"5.."}[5m])) by (namespace)
-                 / sum(rate(nginx_http_requests_total[5m])) by (namespace) > 0.05
+               sum(rate(http_request_duration_seconds_count{status=~"5.."}[5m])) by (namespace)
+                 / sum(rate(http_request_duration_seconds_count[5m])) by (namespace) > 0.05
              for: 5m
              labels:
                severity: critical
              annotations:
-               summary: "nginx 5xx rate > 5% in {{ $labels.namespace }}"
+               summary: "API 5xx rate > 5% in {{ $labels.namespace }}"
                description: "{{ $value | humanizePercentage }} of requests are 5xx over the last 5m."
    ```
 
@@ -105,16 +101,16 @@ Alertmanager groups by `alertname` + `namespace`.
    ```yaml
    resources:
      - alertmanager-config.yaml
-     - rules/nginx-restarts.yaml
-     - rules/nginx-5xx.yaml          # <-- add
+     - rules/api-restarts.yaml
+     - rules/api-5xx.yaml          # <-- add
    ```
 
 4. **Commit, push, reconcile:**
 
    ```bash
-   git add infrastructure/alert/ && git commit -m "add NginxHigh5xxRate alert" && git push
-   flux reconcile source git nginx-demo-config -n flux-system
-   flux reconcile kustomization nginx-demo-config-alert -n flux-system
+   git add infrastructure/alert/ && git commit -m "add ApiHigh5xxRate alert" && git push
+   flux reconcile source git platform-config -n flux-system
+   flux reconcile kustomization platform-config-alert -n flux-system
    ```
 
 5. **Verify it loaded into Prometheus:**
@@ -185,11 +181,11 @@ spec:
 ### 1. Trigger a restart
 
 ```bash
-kubectl exec -n nginx-dev-app-ns deploy/nginx-demo -c nginx-demo -- sh -c "kill 1"
-# or qa:
-kubectl exec -n nginx-qa-app-ns  deploy/nginx-demo -c nginx-demo -- sh -c "kill 1"
+kubectl exec -n user-management-app-dev-ns deploy/user-management-app-api -c api -- kill 1
+# or qa/prod:
+kubectl exec -n user-management-app-qa-ns  deploy/user-management-app-api -c api -- kill 1
 
-kubectl get pods -n nginx-dev-app-ns \
+kubectl get pods -n user-management-app-dev-ns \
   -o custom-columns='POD:.metadata.name,RESTARTS:.status.containerStatuses[*].restartCount' -w
 ```
 
@@ -201,11 +197,11 @@ kubectl port-forward -n monitoring svc/kube-prom-stack-kube-prome-alertmanager 9
 
 # rule state
 watch -n5 'curl -s http://localhost:9090/api/v1/rules \
-  | jq -r ".data.groups[].rules[] | select(.name==\"NginxPodRestarting\") | .state, (.alerts[]?.labels.namespace)"'
+  | jq -r ".data.groups[].rules[] | select(.name==\"UserManagementAppPodRestarting\") | .state, (.alerts[]?.labels.namespace)"'
 
 # once firing, it shows in Alertmanager:
 curl -s http://localhost:9093/api/v2/alerts \
-  | jq -r '.[] | select(.labels.alertname=="NginxPodRestarting") | "\(.labels.namespace)\t\(.status.state)"'
+  | jq -r '.[] | select(.labels.alertname=="UserManagementAppPodRestarting") | "\(.labels.namespace)\t\(.status.state)"'
 ```
 
 Observed timeline: `inactive` → `pending` (~30s, one scrape) → `firing` (after `for: 1m`)
@@ -227,5 +223,7 @@ curl -s http://localhost:9093/api/v2/status | jq -r '.config.original' | grep -A
 kubectl get secret gmail-smtp-secret -n monitoring -o jsonpath='{.data.password}' | base64 -d | wc -c
 ```
 
-Common causes: secret missing / wrong key name, expired Gmail app password, or the
-`PrometheusRule` missing the `release: kube-prom-stack` label so it never loaded.
+Common causes: secret missing / wrong key, expired Gmail app password, or the
+`PrometheusRule` missing the `release: kube-prom-stack` label so it never loaded. See
+the root README's [Rollback](../../README.md#9-rollback) section for how to recover a
+bad alert or secret change quickly.

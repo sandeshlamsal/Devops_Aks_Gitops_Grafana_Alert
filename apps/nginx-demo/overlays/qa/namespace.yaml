@@ -1,5 +1,0 @@
-# QA app namespace.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: nginx-qa-app-ns

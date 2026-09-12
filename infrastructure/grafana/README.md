@@ -38,10 +38,10 @@ kubectl get svc grafana-service -n monitoring -o jsonpath='{.status.loadBalancer
 Open `http://<EXTERNAL-IP>:3000` — currently **http://20.161.101.114:3000**
 
 - login: `admin` / `changeme123` (from `grafana.yaml` → `spec.config.security`)
-- **Dashboards → Custom Application Dashboards → Nginx Dashboard**
-  direct: `http://<EXTERNAL-IP>:3000/d/nginx-demo/nginx-dashboard`
+- **Dashboards → Custom Application Dashboards → User Management App**
+  direct: `http://<EXTERNAL-IP>:3000/d/user-management-app/user-management-app`
 - folder: `http://<EXTERNAL-IP>:3000/dashboards/f/<folder-uid>/custom-application-dashboards`
-- top-left **Namespace** dropdown → `nginx-dev-app-ns` / `nginx-qa-app-ns` / *All*
+- top-left **Namespace** dropdown → `user-management-app-dev-ns` / `user-management-app-qa-ns` / `user-management-app-prod-ns` / *All*
 
 > The IP is internet-facing with a demo password — see [Exposing Grafana](#exposing-grafana)
 > for how to lock it down (Secret-backed password, or ClusterIP + Ingress with auth).
@@ -58,7 +58,7 @@ kubectl port-forward -n monitoring svc/grafana-service 3000:3000
 ```bash
 IP=$(kubectl get svc grafana-service -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 curl -s -u admin:changeme123 "http://$IP:3000/api/search?type=dash-db"
-#   → [{"title":"Nginx Dashboard", ... "folderTitle":"Custom Application Dashboards" ...}]
+#   → [{"title":"User Management App", ... "folderTitle":"Custom Application Dashboards" ...}]
 ```
 
 If the dashboard is briefly missing after a Grafana pod restart: it's stateless (no PVC),
@@ -75,7 +75,7 @@ and the operator re-pushes it every `resyncPeriod` (1m). Force it now with
 | `operator/kustomization.yaml` | Kustomization | the operator install as its own unit |
 | `grafana.yaml` | `Grafana` + `GrafanaDatasource` | the Grafana instance (Deployment + `grafana-service:3000`) and its Prometheus datasource (uid `prometheusdatasource`) |
 | `folder.yaml` | `GrafanaFolder` | the **"Custom Application Dashboards"** folder |
-| `json/nginx-demo.json` | — | the **Nginx Dashboard** model (plain Grafana JSON) |
+| `json/user-management-app.json` | — | the **User Management App** dashboard model (plain Grafana JSON) |
 | `dashboard.yaml` | `GrafanaDashboard` | references the ConfigMap key + files the dashboard in the folder |
 | `kustomization.yaml` | Kustomization | `configMapGenerator` bundles `json/*.json` into the `grafana-dashboards` ConfigMap; applies the CRs above |
 
@@ -97,10 +97,10 @@ consistent or CRs show `NO MATCHING INSTANCES`.
 ### How a dashboard JSON reaches Grafana
 
 ```
-json/nginx-demo.json                     (plain JSON, you edit this)
+json/user-management-app.json                     (plain JSON, you edit this)
       │  kustomization.yaml → configMapGenerator (files:), disableNameSuffixHash
       ▼
-ConfigMap monitoring/grafana-dashboards  (key: nginx-demo.json)
+ConfigMap monitoring/grafana-dashboards  (key: user-management-app.json)
       │  dashboard.yaml → GrafanaDashboard { configMapRef: {name, key}, folderRef }
       ▼
 Grafana Operator  → PUTs the dashboard into Grafana, in the "Custom Application Dashboards" folder
@@ -166,12 +166,12 @@ hostname, on port 80:
 spec:
   config:
     server:
-      domain: "nginx-demo-grafana.eastus2.cloudapp.azure.com"
-      root_url: "http://nginx-demo-grafana.eastus2.cloudapp.azure.com/"
+      domain: "usermgmt-grafana.eastus2.cloudapp.azure.com"
+      root_url: "http://usermgmt-grafana.eastus2.cloudapp.azure.com/"
   service:
     metadata:
       annotations:
-        service.beta.kubernetes.io/azure-dns-label-name: "nginx-demo-grafana"
+        service.beta.kubernetes.io/azure-dns-label-name: "usermgmt-grafana"
     spec:
       type: LoadBalancer
       ports:
@@ -179,7 +179,7 @@ spec:
 ```
 
 - The `azure-dns-label-name` annotation makes Azure publish
-  `nginx-demo-grafana.<region>.cloudapp.azure.com` and pin it to the LB's public IP —
+  `usermgmt-grafana.<region>.cloudapp.azure.com` and pin it to the LB's public IP —
   the URL stays valid even if the Service is recreated.
 - `port: 80 → targetPort: 3000` keeps `:3000` out of the URL.
 - `server.domain` / `root_url` make Grafana emit correct redirect/share links.
@@ -247,7 +247,7 @@ State now survives pod restarts. Dashboards/datasource/folders are still declare
      - name: grafana-dashboards
        namespace: monitoring
        files:
-         - json/nginx-demo.json
+         - json/user-management-app.json
          - json/my-service.json        # <-- add
    ```
 
@@ -275,8 +275,8 @@ State now survives pod restarts. Dashboards/datasource/folders are still declare
 
    ```bash
    git add infrastructure/grafana/ && git commit -m "add my-service dashboard" && git push
-   flux reconcile source git nginx-demo-config -n flux-system
-   flux reconcile kustomization nginx-demo-config-grafana -n flux-system
+   flux reconcile source git platform-config -n flux-system
+   flux reconcile kustomization platform-config-grafana -n flux-system
    ```
 
 6. **Verify:**
@@ -307,19 +307,19 @@ spec:
 
 ---
 
-## The Nginx Dashboard
+## The User Management App dashboard
 
-`json/nginx-demo.json`, uid `nginx-demo`, in folder **Custom Application Dashboards**.
+`json/user-management-app.json`, uid `user-management-app`, in folder **Custom Application Dashboards**.
 
 - **Namespace** template variable (multi-value, defaults to *All*):
-  `label_values(kube_pod_info{pod=~"nginx-demo-.*"}, namespace)` — every namespace running
-  the app appears automatically (`nginx-dev-app-ns`, `nginx-qa-app-ns`, …).
+  `label_values(kube_pod_info{pod=~"user-management-app-.*"}, namespace)` — every namespace running
+  the app appears automatically (`user-management-app-dev-ns`, `user-management-app-qa-ns`, `user-management-app-prod-ns`, …).
 - Panels (all `by (namespace, pod)`):
   - **CPU usage (cores) per pod** — `rate(container_cpu_usage_seconds_total{…}[5m])`
   - **Memory working set (bytes) per pod** — `container_memory_working_set_bytes{…}`
   - **Container restarts per pod** — `kube_pod_container_status_restarts_total{…}`
 
-To change it: edit `json/nginx-demo.json`, commit, push, reconcile (as above). The
+To change it: edit `json/user-management-app.json`, commit, push, reconcile (as above). The
 operator re-pushes within `resyncPeriod`.
 
 ---
@@ -337,7 +337,7 @@ curl -s -u admin:changeme123 'http://localhost:3000/api/folders'                
 
 # values the Namespace variable will show:
 curl -s -u admin:changeme123 \
-  'http://localhost:3000/api/datasources/uid/prometheusdatasource/resources/api/v1/label/namespace/values?match%5B%5D=kube_pod_info%7Bpod%3D~%22nginx-demo-.%2A%22%7D'
+  'http://localhost:3000/api/datasources/uid/prometheusdatasource/resources/api/v1/label/namespace/values?match%5B%5D=kube_pod_info%7Bpod%3D~%22user-management-app-.%2A%22%7D'
 
 # operator logs
 kubectl logs -n monitoring deploy/grafana-operator --tail=100

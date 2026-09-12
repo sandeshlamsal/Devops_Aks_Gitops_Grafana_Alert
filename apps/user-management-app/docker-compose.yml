@@ -1,0 +1,64 @@
+# Local Docker Desktop test rig — the same 3 containers AKS runs (db / api / ui),
+# built from the exact Dockerfiles used for the real images, wired with the exact env
+# var names the k8s manifests set. See ../README.md (this file's sibling) for the
+# full local-test walkthrough. NOT used by Flux/AKS — that's k8s/base + k8s/overlays.
+#
+#   docker compose up --build -d
+#   docker compose logs -f migrate      # watch migrations + fixtures apply
+#   open http://localhost:8081          # log in admin / password123
+#   docker compose down -v              # stop + wipe the local db volume
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-appuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pw}
+      POSTGRES_DB: ${POSTGRES_DB:-user_management_app}
+    ports:
+      - "5434:5432"   # host 5434 to dodge whatever else is already on 5432 locally
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-appuser}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot, same image as `api`: applies migrations then seeds fixtures — the local
+  # equivalent of k8s/base/db-migrate-job.yaml. Exits 0 on success; `api` waits for it.
+  migrate:
+    build: ./api
+    env_file: .env
+    command: ["sh", "-c", "node src/migrate.js && node src/seed.js"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build: ./api
+    env_file: .env
+    environment:
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/api/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  ui:
+    build: ./ui
+    environment:
+      API_HOST: api:8080
+    ports:
+      - "8081:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  db-data:

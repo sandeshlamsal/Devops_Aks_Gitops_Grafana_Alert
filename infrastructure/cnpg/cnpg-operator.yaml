@@ -1,5 +1,5 @@
 # CloudNativePG — https://cloudnative-pg.io  (Apache-2.0, CNCF sandbox).
-# Installs the operator + CRDs. `Cluster` CRs (apps/user-login/k8s/base/db-cluster.yaml)
+# Installs the operator + CRDs. `Cluster` CRs (apps/user-management-app/k8s/base/db-cluster.yaml)
 # then get a Postgres primary, generated credentials Secret, and rw/ro/r Services.
 # Its own Flux Kustomization ("cnpg-operator") — CRD-ordering, same as the other operators.
 ---

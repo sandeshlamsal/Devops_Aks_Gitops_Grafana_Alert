@@ -1,0 +1,28 @@
+# Alert: UserManagementAppPodRestarting — fires when an api/ui container of
+# user-management-app restarts, in ANY namespace. A PrometheusRule CR: the Prometheus
+# Operator loads it into Prometheus, which evaluates the expr and forwards firing
+# alerts to Alertmanager. Routing to email is in ../alertmanager-config.yaml.
+#
+# Namespace-agnostic on purpose: it matches the workload by container/pod name, not by
+# a hard-coded namespace, so dev/qa/prod (and any future env) are covered automatically.
+# The firing alert carries the real namespace in its `namespace` label, and
+# Alertmanager groups by it.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: api-restarts
+  namespace: monitoring
+  labels:
+    release: kube-prom-stack
+spec:
+  groups:
+    - name: user-management-app
+      rules:
+        - alert: UserManagementAppPodRestarting
+          expr: increase(kube_pod_container_status_restarts_total{container=~"api|ui", pod=~"user-management-app-.*"}[5m]) > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "user-management-app pod restarted"
+            description: "Pod {{ $labels.pod }} (container {{ $labels.container }}) in namespace {{ $labels.namespace }} restarted {{ $value }} time(s) in the last 5 minutes."

@@ -1,0 +1,23 @@
+# WHY: reconciles user-management-app into user-management-app-prod-ns. Only ever
+# updated by a merged "promote to prod" PR (.github/workflows/promote-prod.yml) —
+# dependsOn cnpg-operator + secrets, same as dev/qa.
+#
+# suspend: true by default, gated behind the GitHub Environment "production" (required
+# reviewers, if configured) — armed (resumed) by promote-prod.yml only after that
+# approval and the PR step.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: user-management-app-prod
+  namespace: flux-system
+spec:
+  interval: 5m
+  suspend: true
+  path: ./apps/user-management-app/k8s/overlays/prod
+  prune: true
+  dependsOn:
+    - name: cnpg-operator
+    - name: secrets
+  sourceRef:
+    kind: GitRepository
+    name: flux-system

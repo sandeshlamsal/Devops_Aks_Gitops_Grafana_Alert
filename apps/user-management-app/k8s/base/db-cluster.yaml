@@ -1,0 +1,24 @@
+# Postgres, managed by the CloudNativePG operator (infrastructure/cnpg/).
+# On bootstrap it creates database `user-management-app` owned by role `appuser` and a Secret
+# `user-management-app-db-app` (keys: username, password, dbname, host, port, uri, ...). The API
+# and the migrate/reset jobs read the `uri` key as DATABASE_URL.
+# Services created by CNPG: user-management-app-db-rw (primary), -ro, -r.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: user-management-app-db
+spec:
+  instances: 1
+  storage:
+    size: 1Gi
+  bootstrap:
+    initdb:
+      database: user-management-app
+      owner: appuser
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

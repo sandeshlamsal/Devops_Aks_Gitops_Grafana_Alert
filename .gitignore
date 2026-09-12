@@ -1,1 +1,8 @@
 .DS_Store
+node_modules/
+
+# real local env values (docker-compose) — never commit these, only *.env.example
+.env
+.env.*
+!.env.example
+

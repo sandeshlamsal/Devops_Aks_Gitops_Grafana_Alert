@@ -1,0 +1,80 @@
+name: Promote to prod
+
+# Manually triggered: pick a version that has already been running in qa. Nothing is
+# rebuilt — the same api/ui images pushed by release.yml are promoted as-is (build
+# once, promote the same artifact through every environment). This job runs under the
+# GitHub Environment "production": if that environment has required reviewers
+# configured (Settings → Environments → production), the run pauses for approval
+# before ANY step below executes, including arming prod. See the root README's CI/CD
+# section for the one-time setup and "Rollback" for how to back this out.
+#
+# prod ships with its Flux Kustomization SUSPENDED by default
+# (clusters/dev/user-management-app-prod.yaml) — this workflow arms it (resumes it)
+# after opening the promotion PR, same pattern as promote-dev.yml / promote-qa.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version already verified in qa, e.g. v1.2.3"
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  promote-prod:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: verify the version exists in ACR for both images
+        run: |
+          az acr repository show-tags -n ${{ vars.ACR_NAME }} --repository user-management-app-api -o tsv | grep -qx "${{ inputs.version }}"
+          az acr repository show-tags -n ${{ vars.ACR_NAME }} --repository user-management-app-ui  -o tsv | grep -qx "${{ inputs.version }}"
+
+      - name: bump prod image tags
+        run: |
+          curl -sL https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+          yq -i '.images[0].newTag = strenv(TAG)' apps/user-management-app/k8s/overlays/prod/kustomization.yaml
+          yq -i '.images[1].newTag = strenv(TAG)' apps/user-management-app/k8s/overlays/prod/kustomization.yaml
+        env:
+          TAG: ${{ inputs.version }}
+
+      - name: open PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "promote ${{ inputs.version }} to prod"
+          branch: release/${{ inputs.version }}-prod
+          title: "Promote ${{ inputs.version }} → prod"
+          labels: release,prod
+          body: |
+            Promoting the already-released, already-qa-verified images:
+            - `user-management-app-api:${{ inputs.version }}`
+            - `user-management-app-ui:${{ inputs.version }}`
+
+            No rebuild — same artifact that ran in qa. Merging this bumps
+            `apps/user-management-app/k8s/overlays/prod/kustomization.yaml`. Flux
+            (`user-management-app-prod`) reconciles prod within its interval after merge.
+
+            **Rollback:** revert this PR and merge, or re-run this workflow with the
+            previous version — see the root README's "Rollback" section.
+
+      - uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+      - uses: azure/setup-kubectl@v4
+      - name: arm prod (resume its Flux Kustomization)
+        run: |
+          NAME="${{ vars.FLUX_KUSTOMIZATION_PREFIX }}user-management-app-prod"
+          kubectl -n flux-system patch kustomization "$NAME" --type merge -p '{"spec":{"suspend":false}}'
+          kubectl -n flux-system get kustomization "$NAME"

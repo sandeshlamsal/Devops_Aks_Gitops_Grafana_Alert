@@ -17,6 +17,6 @@ configMapGenerator:
   - name: grafana-dashboards
     namespace: monitoring
     files:
-      - json/nginx-demo.json
+      - json/user-management-app.json
 generatorOptions:
   disableNameSuffixHash: true

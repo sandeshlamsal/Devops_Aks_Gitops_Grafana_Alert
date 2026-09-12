@@ -1,0 +1,41 @@
+# A SEPARATE GitRepository from the AKS-managed one Flux's extension already created —
+# that one is read-only. image-automation-controller needs WRITE credentials to commit
+# tag bumps back to git, so it gets its own source pointed at a PAT-backed Secret.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: flux-image-updater
+  namespace: flux-system
+spec:
+  interval: 5m
+  url: https://github.com/sandeshlamsal/Devops_Aks_Gitops_Grafana_Alert
+  ref:
+    branch: main
+  secretRef:
+    name: flux-git-credentials
+---
+# GitHub PAT (fine-grained, Contents: read+write, this repo only) out of git, via
+# OpenBao -> ESO. Seed once:
+#   bao kv put kv/flux/git-credentials username='<github-username>' password='<PAT>'
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: flux-git-credentials
+  namespace: flux-system
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: openbao
+  target:
+    name: flux-git-credentials
+    creationPolicy: Owner
+  data:
+    - secretKey: username
+      remoteRef:
+        key: flux/git-credentials
+        property: username
+    - secretKey: password
+      remoteRef:
+        key: flux/git-credentials
+        property: password

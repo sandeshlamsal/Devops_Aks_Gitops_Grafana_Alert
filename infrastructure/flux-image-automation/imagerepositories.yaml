@@ -1,0 +1,22 @@
+# One ImageRepository per image: image-reflector-controller polls ACR's tag list here.
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: user-management-app-api
+  namespace: flux-system
+spec:
+  image: sanaksregistry.azurecr.io/user-management-app-api
+  interval: 1m
+  secretRef:
+    name: acr-credentials
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: user-management-app-ui
+  namespace: flux-system
+spec:
+  image: sanaksregistry.azurecr.io/user-management-app-ui
+  interval: 1m
+  secretRef:
+    name: acr-credentials

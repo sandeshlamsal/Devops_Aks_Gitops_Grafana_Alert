@@ -1,28 +1,24 @@
-# The "Nginx Dashboard": per-pod CPU, memory and restarts, with a Namespace picker
-# (dev / qa / any namespace running the app).
+# The "User Management App" dashboard: per-pod CPU, memory and restarts, with a
+# Namespace picker (dev / qa / prod / any namespace running the app).
 #
-# The dashboard model is NOT inline here — it lives in json/nginx-demo.json and is
-# bundled into the `grafana-dashboards` ConfigMap by kustomization.yaml. This CR points
-# the operator at that ConfigMap key and files it under the "Custom Application
+# The dashboard model is NOT inline here — it lives in json/user-management-app.json
+# and is bundled into the `grafana-dashboards` ConfigMap by kustomization.yaml. This CR
+# points the operator at that ConfigMap key and files it under the "Custom Application
 # Dashboards" folder (folder.yaml).
 #
-# To change the dashboard: edit json/nginx-demo.json (or paste a fresh model exported
-# from the Grafana UI), commit, push.
+# To change the dashboard: edit json/user-management-app.json (or paste a fresh model
+# exported from the Grafana UI), commit, push.
 apiVersion: grafana.integreatly.org/v1beta1
 kind: GrafanaDashboard
 metadata:
-  name: nginx-demo
+  name: user-management-app
   namespace: monitoring
 spec:
   instanceSelector:
     matchLabels:
       dashboards: "grafana"
   folderRef: custom-application-dashboards
-  # Grafana keeps its state in an in-pod SQLite DB (no PVC — stateless by design here).
-  # The operator re-pushes this dashboard every resyncPeriod, so if the Grafana pod
-  # restarts the dashboard is back within a minute. git is the source of truth; edits
-  # made in the Grafana UI are overwritten.
   resyncPeriod: 1m
   configMapRef:
     name: grafana-dashboards
-    key: nginx-demo.json
+    key: user-management-app.json

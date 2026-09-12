@@ -1,0 +1,21 @@
+# qa-specific values.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-management-app-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          env:
+            - name: APP_ENV
+              value: qa
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-management-app-ui
+  annotations:
+    # → user-management-qa.eastus2.cloudapp.azure.com
+    service.beta.kubernetes.io/azure-dns-label-name: user-management-qa

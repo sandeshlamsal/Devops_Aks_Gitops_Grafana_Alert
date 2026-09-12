@@ -1,0 +1,75 @@
+name: Promote to qa
+
+# Manually triggered: pick a version already built by release.yml (nothing is
+# rebuilt — build once, promote the same artifact). Bumps the qa overlay via a
+# reviewed PR, then arms qa by resuming its Flux Kustomization (ships suspended by
+# default — see clusters/dev/user-management-app-qa.yaml). qa's Kustomization
+# interval is 1h, so once armed, a merged bump lands within an hour — not instantly.
+# Re-run this any time qa needs to be (re-)armed after a manual suspend.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to promote, e.g. v1.2.3 (must already exist in ACR)"
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  promote-qa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: verify the version exists in ACR for both images
+        run: |
+          az acr repository show-tags -n ${{ vars.ACR_NAME }} --repository user-management-app-api -o tsv | grep -qx "${{ inputs.version }}"
+          az acr repository show-tags -n ${{ vars.ACR_NAME }} --repository user-management-app-ui  -o tsv | grep -qx "${{ inputs.version }}"
+
+      - name: bump qa image tags
+        run: |
+          curl -sL https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+          yq -i '(.images[] | select(.name == "user-management-app-api") | .newTag) = strenv(TAG)' apps/user-management-app/k8s/overlays/qa/kustomization.yaml
+          yq -i '(.images[] | select(.name == "user-management-app-ui")  | .newTag) = strenv(TAG)' apps/user-management-app/k8s/overlays/qa/kustomization.yaml
+        env:
+          TAG: ${{ inputs.version }}
+
+      - name: open PR
+        id: pr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "promote ${{ inputs.version }} to qa"
+          branch: release/${{ inputs.version }}-qa
+          title: "Promote ${{ inputs.version }} → qa"
+          labels: release,qa
+          body: |
+            Promoting the already-built, already-scanned images:
+            - `user-management-app-api:${{ inputs.version }}`
+            - `user-management-app-ui:${{ inputs.version }}`
+
+            Merging this bumps `apps/user-management-app/k8s/overlays/qa/kustomization.yaml`.
+            qa's Flux Kustomization is being armed (resumed) by this same workflow run —
+            once merged, it reconciles within its 1h interval.
+
+            **Rollback:** revert this PR and merge, or re-run this workflow with the
+            previous version — see the root README's "Rollback" section.
+
+      - uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+      - uses: azure/setup-kubectl@v4
+      - name: arm qa (resume its Flux Kustomization)
+        run: |
+          NAME="${{ vars.FLUX_KUSTOMIZATION_PREFIX }}user-management-app-qa"
+          kubectl -n flux-system patch kustomization "$NAME" --type merge -p '{"spec":{"suspend":false}}'
+          kubectl -n flux-system get kustomization "$NAME"

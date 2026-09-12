@@ -28,7 +28,7 @@ original name `infrastructure` — same thing, see the root README §2).
 | Value | Why |
 |---|---|
 | `grafana.enabled: false` | dashboards come from the Grafana Operator (`../grafana/`), not this chart's bundled Grafana — one Grafana on the cluster |
-| `prometheus.prometheusSpec.serviceMonitorSelector: {}` + `serviceMonitorNamespaceSelector: {}` | discover **every** `ServiceMonitor` in **every** namespace — so `apps/nginx-demo/base/servicemonitor.yaml` is picked up wherever an overlay deploys it |
+| `prometheus.prometheusSpec.serviceMonitorSelector: {}` + `serviceMonitorNamespaceSelector: {}` | discover **every** `ServiceMonitor` in **every** namespace — so `apps/user-management-app/k8s/base/api.yaml's ServiceMonitor` is picked up wherever an overlay deploys it |
 | `prometheus.prometheusSpec.ruleSelector: {}` + `ruleNamespaceSelector: {}` | same, for `PrometheusRule` CRs |
 | `alertmanager.alertmanagerSpec.alertmanagerConfigSelector: {}` + `alertmanagerConfigNamespaceSelector: {}` | discover every `AlertmanagerConfig` CR |
 | `alertmanager.alertmanagerSpec.alertmanagerConfigMatcherStrategy.type: None` | the `AlertmanagerConfig`'s own `route` becomes the true root route — no auto-injected `namespace=` matcher that would otherwise scope routing to the CR's namespace |
@@ -44,7 +44,7 @@ original name `infrastructure` — same thing, see the root README §2).
 ## How discovery works (why new namespaces "just work")
 
 ```
-overlay deploys:  Service (labels app=nginx-demo) + ServiceMonitor (selector app=nginx-demo)
+overlay deploys:  Service + ServiceMonitor (selector app=user-management-app-api)
                         │
 Prometheus Operator ────┘  serviceMonitorNamespaceSelector:{} → looks in ALL namespaces
                         │  serviceMonitorSelector:{}          → matches ALL ServiceMonitors
@@ -52,7 +52,7 @@ Prometheus Operator ────┘  serviceMonitorNamespaceSelector:{} → look
    writes a scrape job into Prometheus  → new pods scraped within one interval (15s)
 ```
 
-So a `staging` overlay in `nginx-staging-app-ns` needs **no** change here.
+So a `staging` overlay in `user-management-app-staging-ns` needs **no** change here.
 
 ---
 
@@ -63,8 +63,8 @@ kubectl get helmrelease kube-prom-stack -n monitoring          # READY=True
 kubectl get pods -n monitoring | grep -E 'prometheus|alertmanager|kube-state|node-exporter|operator'
 
 kubectl port-forward -n monitoring svc/kube-prom-stack-kube-prome-prometheus 9090:9090
-#   http://localhost:9090/targets   → nginx-demo targets, one per pod, UP
-#   http://localhost:9090/rules     → NginxPodRestarting listed
+#   http://localhost:9090/targets   → user-management-app-api targets, one per pod, UP
+#   http://localhost:9090/rules     → UserManagementAppPodRestarting listed
 #   http://localhost:9090/config    → scrape configs
 
 # Alertmanager
@@ -76,5 +76,5 @@ curl -s http://localhost:9093/api/v2/status | jq -r '.config.original' | head -4
 ## Upgrade the chart
 
 Bump `spec.chart.spec.version` in `kube-prometheus-stack.yaml`, commit, push,
-`flux reconcile kustomization nginx-demo-config-infrastructure -n flux-system`. The
+`flux reconcile kustomization platform-config-prometheus -n flux-system`. The
 helm-controller runs the upgrade; CRDs are updated by the chart's own CRD job.

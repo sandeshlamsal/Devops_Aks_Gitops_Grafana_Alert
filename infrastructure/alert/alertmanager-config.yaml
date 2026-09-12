@@ -4,7 +4,7 @@
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig
 metadata:
-  name: nginx-demo-routing
+  name: user-management-app-routing
   namespace: monitoring
 spec:
   route:

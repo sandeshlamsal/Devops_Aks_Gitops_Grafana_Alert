@@ -1,0 +1,13 @@
+# Applied by the Flux Kustomization "flux-image-automation" (clusters/dev/…yaml).
+#
+# Requires image-reflector-controller + image-automation-controller to be enabled on
+# the AKS Flux extension FIRST (they ship the CRDs these objects use, and are off by
+# default) — see infrastructure/flux-image-automation/README.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - git-repository.yaml
+  - acr-pull-secret.yaml
+  - imagerepositories.yaml
+  - imagepolicies-dev.yaml
+  - imageupdateautomation.yaml

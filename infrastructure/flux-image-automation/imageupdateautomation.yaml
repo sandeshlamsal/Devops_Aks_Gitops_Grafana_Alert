@@ -1,0 +1,34 @@
+# The write-back step: whenever an ImagePolicy above has a new "latest" tag,
+# image-automation-controller rewrites the matching `# {"$imagepolicy": ...}` marker
+# in apps/user-management-app/k8s/overlays/dev/kustomization.yaml and commits + pushes
+# straight to main via the flux-image-updater GitRepository (git-repository.yaml).
+# This is the whole "continuous deployment to dev" loop — no PR, no human step.
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageUpdateAutomation
+metadata:
+  name: dev-images
+  namespace: flux-system
+spec:
+  interval: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-image-updater
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        name: fluxcdbot
+        email: fluxcdbot@users.noreply.github.com
+      messageTemplate: |
+        chore(dev): auto-update image tag(s)
+
+        {{ range .Updated.Images -}}
+        {{ println . }}
+        {{ end -}}
+    push:
+      branch: main
+  update:
+    path: ./apps/user-management-app/k8s/overlays/dev
+    strategy: Setters

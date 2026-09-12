@@ -1,0 +1,22 @@
+# prod overlay → namespace user-management-app-prod-ns. Reconciled by
+# clusters/dev/user-management-app-prod.yaml.
+#
+# newTag here is bumped ONLY by the "promote to prod" release workflow (opens a PR
+# after a version has already been running in qa) — never by Flux image automation,
+# never by hand in a hurry. No $imagepolicy markers. See the root README's CI/CD
+# section for the dev → qa → prod promotion flow, and "Rollback" for how to back out.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: user-management-app-prod-ns
+resources:
+  - namespace.yaml
+  - ../../base
+images:
+  - name: user-management-app-api
+    newName: sanaksregistry.azurecr.io/user-management-app-api
+    newTag: v1
+  - name: user-management-app-ui
+    newName: sanaksregistry.azurecr.io/user-management-app-ui
+    newTag: v1
+patches:
+  - path: patch.yaml

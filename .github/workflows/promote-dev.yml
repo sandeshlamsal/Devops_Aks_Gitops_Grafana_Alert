@@ -1,0 +1,58 @@
+name: Promote to dev
+
+# Dev's image tag is normally kept current automatically by Flux Image Automation
+# (infrastructure/flux-image-automation/ commits new dev-<N> tags as CI builds them) —
+# this workflow does NOT build or, usually, bump anything. Its job is arming: dev
+# ships with its Flux Kustomization SUSPENDED by default (clusters/dev/…dev.yaml), so
+# nothing actually deploys until this is run once. Re-run any time dev needs to be
+# (re-)armed after a manual suspend (e.g. to freeze dev while investigating an issue).
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Optional: pin dev to this exact tag (e.g. dev-42) instead of whatever Flux Image Automation last committed. Leave blank to just arm dev."
+        required: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  promote-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: pin an explicit tag (optional override)
+        if: ${{ inputs.image_tag != '' }}
+        run: |
+          curl -sL https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+          yq -i '(.images[] | select(.name == "user-management-app-api") | .newTag) = strenv(TAG)' apps/user-management-app/k8s/overlays/dev/kustomization.yaml
+          yq -i '(.images[] | select(.name == "user-management-app-ui")  | .newTag) = strenv(TAG)' apps/user-management-app/k8s/overlays/dev/kustomization.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "promote dev: pin to ${TAG}"
+          git push
+        env:
+          TAG: ${{ inputs.image_tag }}
+      # Note: a manual pin is temporary — Flux Image Automation's ImagePolicy will
+      # overwrite it with its own "latest dev-<N>" at its next 5m cycle unless you
+      # also suspend flux-image-automation's ImageUpdateAutomation in the meantime.
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+      - uses: azure/setup-kubectl@v4
+
+      - name: arm dev (resume its Flux Kustomization)
+        run: |
+          NAME="${{ vars.FLUX_KUSTOMIZATION_PREFIX }}user-management-app-dev"
+          kubectl -n flux-system patch kustomization "$NAME" --type merge -p '{"spec":{"suspend":false}}'
+          kubectl -n flux-system get kustomization "$NAME"

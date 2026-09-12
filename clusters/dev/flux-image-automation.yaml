@@ -1,0 +1,20 @@
+# WHY: applies the ImageRepository/ImagePolicy/ImageUpdateAutomation CRs that give dev
+# continuous deployment "from Flux". dependsOn secrets (needs OpenBao/ESO for the ACR
+# pull + git-write credentials). Also requires enabling image-reflector-controller and
+# image-automation-controller on the AKS Flux extension — see
+# infrastructure/flux-image-automation/README.md — Flux will retry this Kustomization
+# until those CRDs exist, same as any other operator-ordering case in this repo.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: flux-image-automation
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./infrastructure/flux-image-automation
+  prune: true
+  dependsOn:
+    - name: secrets
+  sourceRef:
+    kind: GitRepository
+    name: flux-system

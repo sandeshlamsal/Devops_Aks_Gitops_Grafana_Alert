@@ -1,0 +1,23 @@
+# WHY: same as user-management-app-dev, into user-management-app-qa-ns from the qa
+# overlay — but promoted only via a reviewed PR (.github/workflows/promote-qa.yml),
+# never by Flux image automation.
+#
+# suspend: true by default — armed (resumed) by "Promote to qa" after it opens/merges
+# the tag-bump PR. interval: 1h (slower than dev/prod on purpose) — once armed, a
+# merged promotion lands within an hour, not instantly.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: user-management-app-qa
+  namespace: flux-system
+spec:
+  interval: 1h
+  suspend: true
+  path: ./apps/user-management-app/k8s/overlays/qa
+  prune: true
+  dependsOn:
+    - name: cnpg-operator
+    - name: secrets
+  sourceRef:
+    kind: GitRepository
+    name: flux-system

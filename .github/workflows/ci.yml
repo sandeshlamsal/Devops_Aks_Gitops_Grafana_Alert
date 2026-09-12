@@ -1,0 +1,132 @@
+name: CI
+
+# PRs: validate + test + build (no push) — a fast, safe check before merge.
+# push to main: same, plus push the built api/ui images to ACR tagged dev-<run_number>
+# and main-<sha>. Flux image automation then bumps the dev overlay automatically
+# (see infrastructure/flux-image-automation/) — no manual tag edits, no PR for dev.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write   # azure/login OIDC — no stored Azure credentials
+
+jobs:
+  validate-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install kustomize
+        run: |
+          curl -sL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" | tar xz
+          sudo mv kustomize /usr/local/bin/
+      - name: kustomize build every overlay + infra kustomization
+        run: |
+          set -e
+          for d in \
+            apps/user-management-app/k8s/overlays/dev \
+            apps/user-management-app/k8s/overlays/qa \
+            apps/user-management-app/k8s/overlays/prod \
+            infrastructure/prometheus \
+            infrastructure/secrets/operator \
+            infrastructure/secrets/openbao \
+            infrastructure/secrets \
+            infrastructure/grafana/operator \
+            infrastructure/grafana \
+            infrastructure/alert \
+            infrastructure/cnpg \
+            infrastructure/flux-image-automation \
+          ; do
+            echo "== $d =="
+            kustomize build "$d" > /dev/null
+          done
+
+  test-api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: appuser
+          POSTGRES_PASSWORD: pw
+          POSTGRES_DB: user_management_app
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U appuser"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: apps/user-management-app/api
+    env:
+      DATABASE_URL: postgres://appuser:pw@localhost:5432/user_management_app
+      JWT_SECRET: ci-test-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/user-management-app/api/package-lock.json
+      - run: npm install --no-audit --no-fund
+      - name: unit + integration tests (must pass before any image is built)
+        run: npm test
+
+  build:
+    needs: [validate-manifests, test-api]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: user-management-app-api
+            context: ./apps/user-management-app/api
+          - image: user-management-app-ui
+            context: ./apps/user-management-app/ui
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: build (PR — verify the Dockerfile only, no push)
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: false
+
+      - uses: azure/login@v2
+        if: github.event_name == 'push'
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: az acr login
+        if: github.event_name == 'push'
+        run: az acr login --name ${{ vars.ACR_NAME }}
+
+      - name: build + push dev image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: |
+            ${{ vars.ACR_NAME }}.azurecr.io/${{ matrix.image }}:dev-${{ github.run_number }}
+            ${{ vars.ACR_NAME }}.azurecr.io/${{ matrix.image }}:main-${{ github.sha }}
+
+      - name: scan the built image
+        if: github.event_name == 'push'
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ vars.ACR_NAME }}.azurecr.io/${{ matrix.image }}:main-${{ github.sha }}
+          severity: CRITICAL,HIGH
+          exit-code: "0"   # report only — flip to "1" once the baseline is clean

@@ -1,0 +1,33 @@
+# dev ONLY. CI tags dev builds "dev-<github.run_number>" (ci.yml) — a plain, always-
+# increasing integer, so a `numerical` policy is exact (no ambiguity like semver
+# pre-release ordering would have). qa and prod are never auto-updated by Flux — they
+# move only via a merged release/promotion PR (see .github/workflows/).
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: user-management-app-api-dev
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: user-management-app-api
+  filterTags:
+    pattern: "^dev-(?P<num>[0-9]+)$"
+    extract: "$num"
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: user-management-app-ui-dev
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: user-management-app-ui
+  filterTags:
+    pattern: "^dev-(?P<num>[0-9]+)$"
+    extract: "$num"
+  policy:
+    numerical:
+      order: asc

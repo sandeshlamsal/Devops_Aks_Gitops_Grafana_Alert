@@ -1,7 +1,0 @@
-# Dev overlay patch: pin nginx-demo to 2 replicas.
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: nginx-demo
-spec:
-  replicas: 2
