@@ -552,8 +552,9 @@ Flux Image Automation (infrastructure/flux-image-automation/, "from Flux")
 "Promote to dev" (workflow_dispatch)  ──arms──►  Kustomization user-management-app-dev
    (only needed once, or after a manual suspend)         reconciles every 5m
 
-git tag vX.Y.Z pushed
-   │ release.yml: build+push+scan user-management-app-{api,ui}:vX.Y.Z  (build once)
+"Release (build)" (workflow_dispatch, version: vX.Y.Z)
+   │ creates+pushes the git tag itself, then release.yml: build+push+scan
+   │ user-management-app-{api,ui}:vX.Y.Z  (build once)
    ▼
 "Promote to qa" (workflow_dispatch, version: vX.Y.Z)
    verify vX.Y.Z exists in ACR → bump qa overlay → open PR → arm qa (resume)
@@ -634,10 +635,16 @@ into the next environment's overlay. What ran in qa is byte-for-byte what reache
 ### Running a promotion
 
 ```text
-Actions tab → "Promote to dev"  → Run workflow                       (arm dev once)
-Actions tab → "Promote to qa"   → Run workflow → version: v1.2.3      (after: git tag v1.2.3 && git push --tags)
-Actions tab → "Promote to prod" → Run workflow → version: v1.2.3      (after qa looks good)
+Actions tab → "Promote to dev"     → Run workflow                       (arm dev once)
+Actions tab → "Release (build)"    → Run workflow → version: v1.2.3     (builds + tags the release)
+Actions tab → "Promote to qa"      → Run workflow → version: v1.2.3     (after release above)
+Actions tab → "Promote to prod"    → Run workflow → version: v1.2.3     (after qa looks good)
 ```
+
+> Don't cut a release by pushing a git tag directly (`git tag vX.Y.Z && git push
+> --tags`) — see the comment at the top of `release.yml` for why that trigger path
+> can't authenticate to Azure on this tenant. Always use "Release (build)" →
+> Run workflow instead; it creates and pushes the real tag itself as its first step.
 
 ### Local test before any of this
 

@@ -178,8 +178,11 @@ all three, in order, with a real release in between:
 # 1. dev — arms it; Flux Image Automation takes over from here on every new dev-<N> tag
 gh workflow run promote-dev.yml
 
-# 2. cut a real release so qa/prod have an image tag to promote
-git tag v1.0.0 && git push --tags        # triggers release.yml: build, scan, push v1.0.0
+# 2. cut a real release so qa/prod have an image tag to promote — via workflow_dispatch,
+#    NOT `git tag && git push --tags` (that trigger's OIDC subject can't match any
+#    federated credential on this tenant; see the comment at the top of release.yml).
+#    This creates+pushes the real v1.0.0 tag itself as its first step.
+gh workflow run release.yml -f version=v1.0.0
 
 # 3. qa — verifies the tag exists in ACR, opens a PR bumping the qa overlay, arms qa
 gh workflow run promote-qa.yml -f version=v1.0.0

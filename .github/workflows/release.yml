@@ -1,16 +1,34 @@
 name: Release (build)
 
-# Cutting a release = pushing a git tag vX.Y.Z. This ONLY builds, pushes and scans the
-# api/ui images tagged with that version — it does not touch any overlay or cluster.
-# Promoting a built version into an environment is a separate, explicit step:
-# promote-dev.yml / promote-qa.yml / promote-prod.yml. That split is what lets the same
-# built artifact be promoted to qa today and prod next week without rebuilding it.
+# Cutting a release = building+pushing+scanning a vX.Y.Z image for api and ui. This
+# does not touch any overlay or cluster — promoting a built version into an environment
+# is a separate, explicit step: promote-dev.yml / promote-qa.yml / promote-prod.yml.
+# That split is what lets the same built artifact be promoted to qa today and prod next
+# week without rebuilding it.
+#
+# Two ways to trigger:
+#   - workflow_dispatch (recommended for this repo's tenant — see below)
+#   - push a git tag v*.*.* directly
+#
+# Azure AD federated credentials match an OIDC subject EXACTLY (repo:OWNER/REPO:ref:
+# refs/heads/main, or :environment:production) — a tag push's subject is
+# repo:OWNER/REPO:ref:refs/tags/vX.Y.Z, a distinct string per tag, so no fixed
+# credential can match every future tag unless your Azure AD tenant supports federated-
+# credential claims-matching expressions (not all do, incl. this repo's). Until/unless
+# you add one, azure/login on a real tag-push trigger will fail — use workflow_dispatch
+# instead (its ref is refs/heads/main, which DOES match the "gh-main" credential); it
+# creates+pushes the real git tag as its own first step so the vX.Y.Z convention holds.
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v1.0.0 (creates+pushes this git tag)"
+        required: true
   push:
     tags: ["v*.*.*"]
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
@@ -18,6 +36,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: resolve version
+        id: v
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: create + push the git tag (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git rev-parse "${{ steps.v.outputs.version }}" >/dev/null 2>&1; then
+            echo "tag ${{ steps.v.outputs.version }} already exists, not re-creating"
+          else
+            git tag -a "${{ steps.v.outputs.version }}" -m "release ${{ steps.v.outputs.version }}"
+            git push origin "${{ steps.v.outputs.version }}"
+          fi
+
       - uses: docker/setup-buildx-action@v3
       - uses: azure/login@v2
         with:
@@ -30,21 +70,21 @@ jobs:
         with:
           context: ./apps/user-management-app/api
           push: true
-          tags: ${{ vars.ACR_NAME }}.azurecr.io/user-management-app-api:${{ github.ref_name }}
+          tags: ${{ vars.ACR_NAME }}.azurecr.io/user-management-app-api:${{ steps.v.outputs.version }}
       - name: build + push ui
         uses: docker/build-push-action@v6
         with:
           context: ./apps/user-management-app/ui
           push: true
-          tags: ${{ vars.ACR_NAME }}.azurecr.io/user-management-app-ui:${{ github.ref_name }}
+          tags: ${{ vars.ACR_NAME }}.azurecr.io/user-management-app-ui:${{ steps.v.outputs.version }}
       - name: scan release images
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ vars.ACR_NAME }}.azurecr.io/user-management-app-api:${{ github.ref_name }}
+          image-ref: ${{ vars.ACR_NAME }}.azurecr.io/user-management-app-api:${{ steps.v.outputs.version }}
           severity: CRITICAL,HIGH
           exit-code: "1"   # a release image failing on CRITICAL/HIGH blocks it going any further
 
       - name: next step
         run: |
-          echo "Built and pushed ${{ github.ref_name }} for api + ui."
-          echo "Promote it with the 'Promote to qa' or 'Promote to dev' workflow (Actions tab -> Run workflow -> version: ${{ github.ref_name }})."
+          echo "Built and pushed ${{ steps.v.outputs.version }} for api + ui."
+          echo "Promote it with the 'Promote to qa' or 'Promote to dev' workflow (Actions tab -> Run workflow -> version: ${{ steps.v.outputs.version }})."
