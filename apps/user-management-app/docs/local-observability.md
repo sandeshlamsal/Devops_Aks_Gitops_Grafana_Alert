@@ -96,8 +96,16 @@ running the app normally does — no test-only code path.
 
 ## 4. Find it in Grafana — step by step
 
-Open **http://localhost:3000**, log in `admin` / `admin`, then go to **Explore** (the
-compass icon in the left nav).
+Open **http://localhost:3000**, log in `admin` / `admin`, then go to **Explore**.
+
+> **UI gotcha (Grafana 11, verified against this exact stack):** the left nav's
+> **Explore** entry expands into shortcut sub-apps — **Metrics** (a Prometheus-only mini
+> app) and **Logs** (a Loki-only mini app). There's no **Traces** shortcut in that list;
+> that Explore-Traces app isn't enabled in this Grafana build. Don't use those
+> shortcuts. Instead click **Explore** itself (the parent row/compass icon), or go
+> straight to `http://localhost:3000/explore` — that's the classic Explore workbench,
+> and it has a datasource dropdown at the top that includes **Loki**, **Tempo**, and
+> **Prometheus**. Everything below assumes you're in that classic workbench.
 
 ### 4a. Logs (Loki)
 
@@ -114,10 +122,20 @@ compass icon in the left nav).
    ```logql
    {service="docker", container="user-management-app-api-1"} | json | status = `401`
    ```
-5. Expand any line — there's a **`trace_id`** field, and next to it a **"View Trace"**
-   button. That button exists because of the `derivedFields` entry in
-   `observability/grafana-datasources.yaml`: it regex-matches `trace_id` out of the JSON
-   line and opens it directly in the Tempo datasource. Click it.
+5. Expand any line (click the small **`>`** arrow at the left edge — clicking the line
+   text itself just selects it). Look for a **`TraceID`** entry (capital, separate from
+   the lowercase `trace_id` you already see in the raw JSON text) with a small link icon
+   next to it. That's the `derivedFields` entry from
+   `observability/grafana-datasources.yaml` — it regex-matches `trace_id` out of the log
+   line and opens it directly in Tempo. Click the icon.
+
+   **If that link doesn't appear or doesn't navigate** (a known rendering quirk we hit
+   testing this), use the guaranteed fallback in 4b instead — copy the `trace_id` value
+   as plain text and paste it straight into Tempo. The backend wiring can be correct
+   (verify with `curl -u admin:admin http://localhost:3000/api/datasources` — the Loki
+   datasource's `jsonData.derivedFields[0].datasourceUid` should equal the Tempo
+   datasource's own `uid`) even when the click-through link itself misbehaves in the
+   browser; don't let that block you from seeing traces.
 
 > **Why isn't the 401 line `level=error`?** It isn't a failure of the *system* — a wrong
 > password is an expected, handled outcome, so it's logged at `info` like every other
@@ -127,15 +145,14 @@ compass icon in the left nav).
 
 ### 4b. Traces (Tempo)
 
-Two ways in:
+The reliable way in (works regardless of the derived-field link quirk in 4a):
 
-- **From a log line** — the "View Trace" button from 4a.5 above.
-- **Directly** — switch the Explore datasource to **Tempo**, and either:
-  - paste a `trace_id` you copied from a log line into the **TraceID** search box, or
-  - use **TraceQL**: `{ name = "POST /api/login" }` lists every login trace.
+1. In the classic Explore workbench, switch the datasource dropdown to **Tempo**.
+2. Paste a `trace_id` you copied from a Loki log line straight into the query box
+   (it accepts a bare trace ID directly — no special syntax needed), **or** use
+   **TraceQL**: `{ name = "POST /api/login" }` lists every login trace.
 
-Either way you land on a trace view (real spans captured while writing this doc, for
-`trace_id=394fa56f834198cc4b7b45e22bbce1c7`):
+You land on a trace view — real spans, captured live while testing this doc:
 
 ```
 POST /api/login                         (root span, ~72ms)
@@ -147,6 +164,12 @@ POST /api/login                         (root span, ~72ms)
    ├─ pg-pool.connect
    └─ pg.query:SELECT user_management_app
 ```
+
+> **Pick a `/api/login` or `/api/users` trace, not a `/metrics` or `/api/healthz`
+> one**, if you want to see the DB child spans (`pg-pool.connect` / `pg.query`). Traces
+> from `/metrics` (Prometheus's own scrape) or `/api/healthz` are real too, but those
+> routes never touch Postgres, so their span tree is just the Express middleware chain —
+> correct, just less interesting to look at.
 
 That's `express` and `pg` auto-instrumentation (from
 `@opentelemetry/auto-instrumentations-node`, wired in `api/src/tracing.js`) — nothing
