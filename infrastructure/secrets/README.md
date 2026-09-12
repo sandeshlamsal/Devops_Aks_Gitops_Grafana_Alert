@@ -331,7 +331,7 @@ spec:
   target:
     name: alertmanager-smtp-conf
     template:
-      engine: v2
+      engineVersion: v2
       data:
         smtp.yaml: |
           host: "{{ .host }}"
