@@ -8,6 +8,57 @@ record of those. Newest first. Each entry: what broke, root cause, the fix, the 
 
 ---
 
+## 2026-09-12 — Self-correction: don't seed Flux's git credential from a personal token
+
+**Where:** `kv/flux/git-credentials` in OpenBao (used by the `flux-image-updater`
+`GitRepository`/`ImageUpdateAutomation` for git write-back of `dev-<N>` image tag bumps).
+
+**What happened:** to unblock `flux-image-automation`'s `GitRepository` auth failure
+during first deploy, `gh auth token` (this machine's own logged-in GitHub CLI OAuth
+token — `repo` + `workflow` scope, tied to a personal account) was used as a quick
+fix. The user caught this and correctly called it out: reusing a broad personal
+credential inside a piece of cluster automation is exactly the anti-pattern OpenBao
+exists to avoid, even though the value never left the user's own OpenBao instance.
+
+**Fix:** reverted `kv/flux/git-credentials` to a placeholder immediately. Correct
+credential is a **fine-grained GitHub PAT scoped to this one repo, `Contents: Read and
+write` only** — nothing else — created by the user directly (GitHub has no API for
+self-service PAT creation) and seeded by the user directly into OpenBao, so the token
+value never passes through an assistant's context at all.
+
+**Lesson:** "it's scoped to your own infrastructure" is not the same bar as "it's the
+minimally-privileged credential for the job" — a quick unblock is still wrong if it
+reaches for a broader-than-necessary credential, personal or not. This is also why the
+Azure side of this same problem (CI/CD's `azure/login`) was designed with OIDC
+federated credentials from the start — no stored secret, no personal token, ever.
+
+---
+
+## 2026-09-12 — AKS Flux extension doesn't enable image-automation controllers by default
+
+**Where:** `platform-config-flux-image-automation` Kustomization — applied cleanly
+(`READY` eventually `True`), but its `ImageRepository`/`ImagePolicy` resources never
+got an `Observed Generation` or any events at all — nothing was reconciling them.
+
+**Root cause:** `az k8s-extension create --extension-type microsoft.flux` installs
+only `source-controller`, `kustomize-controller`, `helm-controller`, and
+`notification-controller` by default. `image-reflector-controller` and
+`image-automation-controller` — the two Flux Image Automation needs — are opt-in.
+
+**Fix:**
+```bash
+az k8s-extension update -g san-rg -c san-dev-aks -t managedClusters --name flux \
+  --config image-automation-controller.enabled=true image-reflector-controller.enabled=true \
+  --yes
+```
+Both pods appeared within ~30s of the extension update succeeding.
+
+**Lesson:** the root README's §3.5 runbook and `docs/operations-runbook.md`'s B4 should
+include this flag on the *initial* `az k8s-extension create` for any deploy that uses
+`infrastructure/flux-image-automation/` — not yet updated there, follow-up needed.
+
+---
+
 ## 2026-09-12 — `aquasecurity/trivy-action@v0.28.0`: broken upstream (deleted transitive tag)
 
 **Where:** `ci.yml` / `release.yml`, `build` job — this is the *second* trivy-action

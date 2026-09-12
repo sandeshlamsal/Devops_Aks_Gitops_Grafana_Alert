@@ -91,7 +91,8 @@ az provider register --namespace Microsoft.KubernetesConfiguration
 
 az k8s-extension create \
   -g san-rg -c san-dev-aks -t managedClusters \
-  --name flux --extension-type microsoft.flux
+  --name flux --extension-type microsoft.flux \
+  --config image-automation-controller.enabled=true image-reflector-controller.enabled=true
 
 az k8s-configuration flux create \
   -g san-rg -c san-dev-aks -t managedClusters \

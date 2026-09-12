@@ -250,12 +250,18 @@ Push this tree to your own git repo. Note the URL + branch for the next step.
 
 ### 3.5 Install the Flux extension + configuration on AKS
 
+The extension installs only `source`/`kustomize`/`helm`/`notification`-controller by
+default — `image-reflector-controller` and `image-automation-controller` (needed by
+`infrastructure/flux-image-automation/`) are opt-in via `--config`, below. Skip that
+flag if you're not using image automation.
+
 ```bash
 az provider register --namespace Microsoft.KubernetesConfiguration
 
 az k8s-extension create \
   -g <RG> -c <CLUSTER> -t managedClusters \
-  --name flux --extension-type microsoft.flux
+  --name flux --extension-type microsoft.flux \
+  --config image-automation-controller.enabled=true image-reflector-controller.enabled=true
 
 az k8s-configuration flux create \
   -g <RG> -c <CLUSTER> -t managedClusters \
@@ -910,7 +916,8 @@ az aks create -g san-rg -n san-dev-aks \
   --node-count 2 --node-vm-size Standard_D2s_v6 \
   --attach-acr <ACR_NAME> --generate-ssh-keys
 az aks get-credentials -g san-rg -n san-dev-aks
-az k8s-extension create -g san-rg -c san-dev-aks -t managedClusters --name flux --extension-type microsoft.flux
+az k8s-extension create -g san-rg -c san-dev-aks -t managedClusters --name flux --extension-type microsoft.flux \
+  --config image-automation-controller.enabled=true image-reflector-controller.enabled=true
 ```
 
 ### Tier 4 — Delete everything
