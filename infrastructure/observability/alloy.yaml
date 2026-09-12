@@ -1,0 +1,106 @@
+# Grafana Alloy — the log shipper. Runs as a DaemonSet (one pod per node, via the
+# chart's default controller.type) so every namespace's pods get their logs picked up.
+# Local equivalent: apps/user-management-app/observability/alloy-config.alloy, which
+# tails the Docker socket instead — on a real cluster there's no docker.sock, so this
+# uses the Kubernetes API (discovery.kubernetes + loki.source.kubernetes) instead: same
+# job (find containers, read their logs, ship to Loki), different discovery mechanism.
+#
+# NOT YET VALIDATED against a live cluster — see infrastructure/observability/README.md.
+# In particular: loki.source.kubernetes reads via the pods/log API subresource, which
+# needs RBAC the chart's default ClusterRole (rbac.create: true, below) is expected to
+# already grant for a "Kubernetes monitoring" Alloy — confirm on first real deploy and
+# add rbac.create-adjacent overrides here if logs don't show up.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: alloy
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: alloy
+      version: ">=0.9.0 <1.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana-charts
+        namespace: monitoring
+  values:
+    controller:
+      type: daemonset
+    rbac:
+      create: true
+    alloy:
+      configMap:
+        create: true
+        content: |
+          discovery.kubernetes "pods" {
+            role = "pod"
+          }
+
+          discovery.relabel "pods" {
+            targets = discovery.kubernetes.pods.targets
+
+            // Cluster-wide discovery picks up kube-system/flux-system noise too — drop
+            // it, keep everything else (monitoring itself, and every app namespace:
+            // user-management-app-dev/qa/prod).
+            rule {
+              source_labels = ["__meta_kubernetes_namespace"]
+              regex         = "kube-system|kube-node-lease|kube-public|flux-system"
+              action        = "drop"
+            }
+
+            rule {
+              source_labels = ["__meta_kubernetes_namespace"]
+              target_label  = "namespace"
+            }
+            rule {
+              source_labels = ["__meta_kubernetes_pod_name"]
+              target_label  = "pod"
+            }
+            rule {
+              source_labels = ["__meta_kubernetes_pod_container_name"]
+              target_label  = "container"
+            }
+          }
+
+          loki.source.kubernetes "pods" {
+            targets    = discovery.relabel.pods.output
+            forward_to = [loki.process.json.receiver]
+          }
+
+          // Same parsing as the local rig: `level` becomes an indexed label (low
+          // cardinality, fine), `trace_id`/`span_id` become structured metadata (NOT a
+          // label — high cardinality) so Grafana can still link a log line to its trace
+          // via datasource-loki.yaml's derivedFields.
+          loki.process "json" {
+            forward_to = [loki.write.default.receiver]
+
+            stage.json {
+              expressions = {
+                level    = "level",
+                trace_id = "trace_id",
+                span_id  = "span_id",
+              }
+            }
+
+            stage.labels {
+              values = { level = "" }
+            }
+
+            stage.structured_metadata {
+              values = {
+                trace_id = "trace_id",
+                span_id  = "span_id",
+              }
+            }
+          }
+
+          loki.write "default" {
+            endpoint {
+              url = "http://loki.monitoring.svc:3100/loki/api/v1/push"
+            }
+          }
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { cpu: 200m, memory: 256Mi }

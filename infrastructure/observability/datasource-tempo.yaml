@@ -1,0 +1,26 @@
+# GrafanaDatasource CR for Tempo. See datasource-loki.yaml for the pattern; this is the
+# other half of the trace<->log correlation — tracesToLogsV2 builds a Loki query from a
+# trace's own traceID, giving the trace view a "Logs for this span" link back.
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: tempo
+  namespace: monitoring
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: "grafana"
+  datasource:
+    name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo.monitoring.svc:3200
+    isDefault: false
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-1h"
+        spanEndTimeShift: "1h"
+        filterByTraceID: true
+        customQuery: false

@@ -1,0 +1,28 @@
+# GrafanaDatasource CR — the operator way of provisioning what
+# apps/user-management-app/observability/grafana-datasources.yaml does with a plain file
+# locally. Same instanceSelector pattern as infrastructure/grafana/grafana.yaml's own
+# Prometheus datasource: attaches to any Grafana CR labeled dashboards: "grafana".
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: "grafana"
+  datasource:
+    name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki.monitoring.svc:3100
+    isDefault: false
+    jsonData:
+      derivedFields:
+        # datasourceUid pointing at a tracing datasource (not `url`) is what makes
+        # Grafana treat the captured group as a trace ID and open it in Tempo directly —
+        # same mechanism, same regex, as the local datasource file.
+        - datasourceUid: tempo
+          matcherRegex: '"trace_id":"(\w+)"'
+          name: TraceID

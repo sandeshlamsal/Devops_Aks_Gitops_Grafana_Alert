@@ -1,0 +1,21 @@
+# WHY: tells Flux to reconcile infrastructure/observability/ — Loki, Tempo, the OTel
+# Collector, Grafana Alloy, and the Loki/Tempo GrafanaDatasource CRs. dependsOn
+# "prometheus" (monitoring namespace + Prometheus Operator CRDs for the collector's
+# ServiceMonitor) and "grafana" (the Grafana CR + dashboards: "grafana" label the
+# datasource CRs attach to).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: observability
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./infrastructure/observability
+  prune: true
+  dependsOn:
+    - name: prometheus
+    - name: grafana
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  targetNamespace: monitoring

@@ -32,9 +32,11 @@ Prometheus and Grafana. (The Azure portal's *Monitoring → Dashboards with Graf
 | Flux Image Automation (CD to dev) | [`infrastructure/flux-image-automation/README.md`](infrastructure/flux-image-automation/README.md) |
 | **Build from scratch (shareable runbook)** | [§3](#3-build-this-from-scratch--step-by-step) |
 | **CI/CD pipeline (dev/qa/prod promotion)** | [§6](#6-cicd-pipeline) |
-| **Rollback** | [§9](#9-rollback) |
-| **Scope & roadmap (multi-cloud / EKS)** | [§10](#10-scope--roadmap) |
-| **Tear down to save cost / stand back up** | [§13](#13-tear-down-to-save-cost--and-stand-back-up) |
+| **Observability: metrics, logs & traces** | [§8](#8-observability-metrics-logs--traces) |
+| **Rollback** | [§10](#10-rollback) |
+| **Scope & roadmap (multi-cloud / EKS)** | [§11](#11-scope--roadmap) |
+| **Tear down to save cost / stand back up** | [§14](#14-tear-down-to-save-cost--and-stand-back-up) |
+| **Operations runbook (full teardown + full stand-up, all 3 envs, one script)** | [`docs/operations-runbook.md`](docs/operations-runbook.md) |
 
 ---
 
@@ -153,6 +155,7 @@ infrastructure/
   alert/
     alertmanager-config.yaml  AlertmanagerConfig — routing + Gmail email receiver
     rules/api-restarts.yaml   PrometheusRule — UserManagementAppPodRestarting
+  observability/              WIP, not yet deployed — Loki/Tempo/Alloy/OTel Collector + Loki+Tempo GrafanaDatasources (§8)
   flux-image-automation/      ImageRepository/ImagePolicy/ImageUpdateAutomation — CD to dev, from Flux
 
 .github/workflows/
@@ -687,7 +690,38 @@ Common causes: secret missing / wrong key, expired Gmail app password, or the
 
 ---
 
-## 8. Day-to-day
+## 8. Observability: metrics, logs & traces
+
+Metrics (kube-prometheus-stack — see §1 and the end-to-end alert test in §7) are one of
+three signals. Logs
+and traces are the other two — **Loki** (logs) and **Tempo** (traces), fed by **Grafana
+Alloy** (log shipper) and an **OpenTelemetry Collector** (trace ingestion), all wired
+into the same Grafana instance as two more `GrafanaDatasource` CRs.
+
+Every piece of this was built and proven **locally first** — a full Docker Compose rig
+with real captured logs, traces, and PromQL/LogQL/TraceQL query output — before any of
+it was written as a Kubernetes manifest:
+**[apps/user-management-app/docs/local-observability.md](apps/user-management-app/docs/local-observability.md)**
+has the architecture diagram, a "why does each component exist" breakdown, and the
+guided walkthrough.
+
+The AKS side lives in `infrastructure/observability/` (Flux Kustomization
+`observability`, `dependsOn` `prometheus` and `grafana`) — same components, same config
+shape, Helm/CRs instead of plain containers. See that folder's own README for the file
+list, the AKS-specific request→Grafana flow diagram, and its first-deploy checklist
+(**status: WIP, not yet validated against a live cluster** — `kustomize build` passes;
+it hasn't been reconciled by a real Flux install yet).
+
+```bash
+kubectl get pods -n monitoring -l app.kubernetes.io/name=loki
+kubectl get pods -n monitoring -l app.kubernetes.io/name=tempo
+kubectl get pods -n monitoring -l app.kubernetes.io/name=alloy
+kubectl get grafanadatasource -n monitoring        # loki + tempo should show "created"
+```
+
+---
+
+## 9. Day-to-day
 
 ```bash
 # after any git push:
@@ -713,7 +747,7 @@ restarts. They are still declared in git — the operator re-pushes them on each
 
 ---
 
-## 9. Rollback
+## 10. Rollback
 
 Every change that reaches a cluster is a git commit — rollback is always "get git back
 to the previous state," never a cluster-side hack.
@@ -735,7 +769,7 @@ reviewable commit.
 
 ---
 
-## 10. Scope & roadmap
+## 11. Scope & roadmap
 
 **In scope today:** a single cluster on **AKS**, one GitHub repo, one CI/CD pipeline
 (GitHub Actions + Flux Image Automation + gated promotion), as documented above.
@@ -765,7 +799,7 @@ service mesh — out of scope until there's a concrete need.
 
 ---
 
-## 11. Why Gmail is the email sender
+## 12. Why Gmail is the email sender
 
 Microsoft disabled basic SMTP auth for personal Outlook.com/Hotmail accounts
 (`535 5.7.139 … basic authentication is disabled`), no user toggle. Gmail still allows
@@ -774,7 +808,7 @@ app-password SMTP with 2-Step Verification, so it's the **sender**;
 
 ---
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 | Symptom | Check | Fix |
 |---|---|---|
@@ -794,7 +828,11 @@ app-password SMTP with 2-Step Verification, so it's the **sender**;
 
 ---
 
-## 13. Tear down to save cost — and stand back up
+## 14. Tear down to save cost — and stand back up
+
+> Want the whole thing (platform + all three environments) as one linear checklist
+> instead of picking through tiers below? **[docs/operations-runbook.md](docs/operations-runbook.md)**
+> is exactly that — full teardown, then full stand-up with dev, qa, *and* prod all armed.
 
 **What costs money here:** the AKS node VMs are the bulk; then a Standard Load Balancer
 with a public IP **per** exposed Service (Grafana + up to 3 app-UI envs + the cluster's

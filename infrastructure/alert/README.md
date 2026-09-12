@@ -225,5 +225,5 @@ kubectl get secret gmail-smtp-secret -n monitoring -o jsonpath='{.data.password}
 
 Common causes: secret missing / wrong key, expired Gmail app password, or the
 `PrometheusRule` missing the `release: kube-prom-stack` label so it never loaded. See
-the root README's [Rollback](../../README.md#9-rollback) section for how to recover a
+the root README's [Rollback](../../README.md#10-rollback) section for how to recover a
 bad alert or secret change quickly.

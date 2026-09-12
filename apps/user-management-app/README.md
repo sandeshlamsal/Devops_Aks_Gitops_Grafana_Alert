@@ -2,7 +2,7 @@
 
 Log in, then see the user list from Postgres. Three microservices, deployed by Flux +
 Kustomize into **`user-management-app-dev-ns`**, **`-qa-ns`**, and **`-prod-ns`** — the
-only app in this repo (see the root README §10 for what a second app/cluster would add).
+only app in this repo (see the root README §11 for what a second app/cluster would add).
 
 ```
 browser ──▶ user-management-app-ui  (React build, served by nginx)
@@ -109,7 +109,7 @@ kubectl -n $NS logs -f job/db-reset-<name>
 It runs `node src/migrate.js --reset && node src/seed.js` →
 `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` then re-migrate + re-seed. Only that
 namespace's DB is touched. This is also the fastest fix for "the DB is in a bad state" —
-see the root README's [Rollback](../../README.md#9-rollback) section.
+see the root README's [Rollback](../../README.md#10-rollback) section.
 
 ---
 

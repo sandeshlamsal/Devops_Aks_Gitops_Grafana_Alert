@@ -1,0 +1,14 @@
+# Applied by the Flux Kustomization "observability" (clusters/dev/observability.yaml),
+# which dependsOn "prometheus" (monitoring namespace + Prometheus Operator CRDs) and
+# "grafana" (the Grafana CR + dashboards: "grafana" label the two GrafanaDatasource CRs
+# here attach to).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - helmrepositories.yaml
+  - loki.yaml
+  - tempo.yaml
+  - otel-collector.yaml
+  - alloy.yaml
+  - datasource-loki.yaml
+  - datasource-tempo.yaml
