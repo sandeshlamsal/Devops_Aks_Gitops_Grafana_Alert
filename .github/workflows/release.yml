@@ -38,7 +38,7 @@ jobs:
           push: true
           tags: ${{ vars.ACR_NAME }}.azurecr.io/user-management-app-ui:${{ github.ref_name }}
       - name: scan release images
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: ${{ vars.ACR_NAME }}.azurecr.io/user-management-app-api:${{ github.ref_name }}
           severity: CRITICAL,HIGH
