@@ -65,6 +65,7 @@ services:
     build: ./ui
     environment:
       API_HOST: api:8080
+      APP_ENV: local
     ports:
       - "8081:80"
     depends_on:

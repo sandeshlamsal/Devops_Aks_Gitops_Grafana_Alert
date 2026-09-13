@@ -14,5 +14,8 @@ RUN apk update && apk upgrade --no-cache
 # nginx.conf is a template; entrypoint substitutes ${API_HOST} from the env at start.
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
+# runs at container start, before nginx starts — writes env.js from $APP_ENV
+COPY docker-entrypoint.d/40-generate-env.sh /docker-entrypoint.d/40-generate-env.sh
+RUN chmod +x /docker-entrypoint.d/40-generate-env.sh
 ENV API_HOST=user-management-app-api:8080
 EXPOSE 80

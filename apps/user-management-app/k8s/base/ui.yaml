@@ -22,6 +22,8 @@ spec:
           env:
             - name: API_HOST
               value: user-management-app-api:8080
+            - name: APP_ENV
+              value: base   # overlay patch.yaml overrides this to dev / qa / prod
           readinessProbe:
             httpGet: { path: /, port: http }
             initialDelaySeconds: 3

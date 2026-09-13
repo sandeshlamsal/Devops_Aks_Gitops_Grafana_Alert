@@ -1,5 +1,10 @@
 import React, { useState } from "react";
 
+// window.APP_ENV is written by docker-entrypoint.d/40-generate-env.sh at container
+// start (see index.html) — same built image, different text per environment. Falls
+// back to "local" for `npm run dev`/tests, where env.js is never generated.
+const APP_ENV = (window.APP_ENV || "local").toUpperCase();
+
 // Two states: not logged in -> login form; logged in -> user list from /api/users.
 export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem("token") || "");
@@ -48,7 +53,7 @@ export default function App() {
   if (!token) {
     return (
       <div style={box}>
-        <h1>Sign in</h1>
+        <h1>Sign in {APP_ENV} env</h1>
         <form onSubmit={login}>
           <div style={{ marginBottom: 8 }}>
             <label>Username<br />
@@ -71,7 +76,7 @@ export default function App() {
   return (
     <div style={box}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1>Users</h1>
+        <h1>Users — {APP_ENV} env</h1>
         <button onClick={logout}>Log out</button>
       </div>
       {!users && <button onClick={() => loadUsers()}>Load users</button>}
