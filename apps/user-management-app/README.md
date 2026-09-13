@@ -4,6 +4,10 @@ Log in, then see the user list from Postgres. Three microservices, deployed by F
 Kustomize into **`user-management-app-dev-ns`**, **`-qa-ns`**, and **`-prod-ns`** — the
 only app in this repo (see the root README §11 for what a second app/cluster would add).
 
+This file is the engineering README (build/deploy/test). For how to actually *use* the
+app — logging in, what admins vs. regular users can do — see
+**[APP_README.md](APP_README.md)**.
+
 ```
 browser ──▶ user-management-app-ui  (React build, served by nginx)
                  │  nginx proxies /api/* ──▶ user-management-app-api  (Node/Express)

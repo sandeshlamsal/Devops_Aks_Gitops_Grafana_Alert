@@ -12,6 +12,7 @@ const EMPTY_FORM = { username: "", password: "", full_name: "", email: "" };
 // hides controls a non-admin's request would get a 403 from anyway).
 export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem("token") || "");
+  const [loginAt, setLoginAt] = useState(() => localStorage.getItem("loginAt") || "");
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("password123");
   const [users, setUsers] = useState(null);
@@ -38,8 +39,11 @@ export default function App() {
       return;
     }
     const { token: t } = await r.json();
+    const now = new Date().toISOString();
     localStorage.setItem("token", t);
+    localStorage.setItem("loginAt", now);
     setToken(t);
+    setLoginAt(now);
     loadMe(t);
     loadUsers(t);
   }
@@ -62,7 +66,9 @@ export default function App() {
 
   function logout() {
     localStorage.removeItem("token");
+    localStorage.removeItem("loginAt");
     setToken("");
+    setLoginAt("");
     setUsers(null);
     setMe(null);
   }
@@ -148,6 +154,12 @@ export default function App() {
         <h1>Users — {APP_ENV} env</h1>
         <button onClick={logout}>Log out</button>
       </div>
+      {me && (
+        <p style={{ color: "#666", fontSize: 13 }}>
+          Logged in as <strong>{me.username}</strong>{me.is_admin ? " (admin)" : ""}
+          {loginAt && ` — since ${new Date(loginAt).toLocaleString()}`}
+        </p>
+      )}
       {!users && <button onClick={() => loadUsers()}>Load users</button>}
       {error && <p style={{ color: "crimson" }}>{error}</p>}
 
