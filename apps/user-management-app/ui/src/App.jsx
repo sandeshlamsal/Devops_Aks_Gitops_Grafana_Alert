@@ -53,7 +53,7 @@ export default function App() {
   if (!token) {
     return (
       <div style={box}>
-        <h1>Sign in {APP_ENV} env</h1>
+        <h1 style={{ color: "crimson" }}>Sign in {APP_ENV} env</h1>
         <form onSubmit={login}>
           <div style={{ marginBottom: 8 }}>
             <label>Username<br />
