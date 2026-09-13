@@ -223,11 +223,13 @@ Kubernetes auth → policy → seed the values), done *after* Flux installs Open
 bao policy write eso-monitoring - <<'EOF'
 path "kv/data/monitoring/*"          { capabilities = ["read"] }
 path "kv/data/user-management-app/*" { capabilities = ["read"] }
-path "kv/data/flux/*"                { capabilities = ["read"] }
 EOF
 bao kv put kv/monitoring/gmail-smtp    password='YOUR_GMAIL_APP_PASSWORD'
 bao kv put kv/monitoring/grafana-admin password='A_STRONG_ADMIN_PASSWORD'
-bao kv put kv/user-management-app/jwt  secret="$(openssl rand -hex 32)"
+# one independent JWT signing secret per environment — never share one across envs
+bao kv put kv/user-management-app/jwt-dev  secret="$(openssl rand -hex 32)"
+bao kv put kv/user-management-app/jwt-qa   secret="$(openssl rand -hex 32)"
+bao kv put kv/user-management-app/jwt-prod secret="$(openssl rand -hex 32)"
 ```
 
 Update `to:` / `from:` / `authUsername:` in `infrastructure/alert/alertmanager-config.yaml`

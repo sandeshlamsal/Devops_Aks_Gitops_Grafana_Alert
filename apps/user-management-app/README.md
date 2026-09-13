@@ -66,6 +66,30 @@ kubectl -n user-management-app-dev-ns exec -it user-management-app-db-1 -- psql 
 
 ---
 
+## UI
+
+A static React SPA served by nginx — normally that would mean baking any
+environment-specific text in at build time, which breaks this repo's "build once,
+promote the same artifact everywhere" model (dev/qa/prod would each need their own
+build). Instead, the sign-in/users page heading ("Sign in DEV env", in red) is set at
+**container start**, not build time:
+
+1. `ui/docker-entrypoint.d/40-generate-env.sh` runs automatically when the container
+   starts (same mechanism nginx's official image already uses for `nginx.conf`'s
+   `${API_HOST}` templating) and writes `/usr/share/nginx/html/env.js` from the
+   container's `APP_ENV` env var.
+2. `index.html` loads that file before the React bundle.
+3. `App.jsx` reads `window.APP_ENV` at render time.
+
+Same built image, different heading per environment — `APP_ENV`'s existing pattern
+(see the API config above), applied to page content instead of a backend response.
+`APP_ENV` is wired the same way for the `ui` container as the `api` one: a `base`
+default in `k8s/base/ui.yaml`, overridden per overlay in each `patch.yaml`.
+
+Verify it yourself against any environment: `curl http://<env-url>/env.js`.
+
+---
+
 ## Database — CloudNativePG
 
 `k8s/base/db-cluster.yaml` is a `postgresql.cnpg.io/v1` `Cluster`: 1 instance (2 for the
@@ -209,7 +233,9 @@ bao policy write eso-monitoring - <<'EOF'
 path "kv/data/monitoring/*"          { capabilities = ["read"] }
 path "kv/data/user-management-app/*" { capabilities = ["read"] }
 EOF
-bao kv put kv/user-management-app/jwt secret="$(openssl rand -hex 32)"
+bao kv put kv/user-management-app/jwt-dev  secret="$(openssl rand -hex 32)"
+bao kv put kv/user-management-app/jwt-qa   secret="$(openssl rand -hex 32)"
+bao kv put kv/user-management-app/jwt-prod secret="$(openssl rand -hex 32)"
 ```
 
 And create the `flux-applier` SA + binding in `user-management-app-dev-ns`,

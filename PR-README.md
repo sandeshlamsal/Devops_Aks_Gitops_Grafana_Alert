@@ -8,6 +8,26 @@ record of those. Newest first. Each entry: what broke, root cause, the fix, the 
 
 ---
 
+## 2026-09-13 — `promote-qa` waited the full 15 minutes even after an early manual merge
+
+**Where:** `promote-qa.yml`'s auto-merge step, run [34734298227].
+
+**Symptom:** PR #5 was merged manually at ~minute 12 (to skip waiting on the review
+window), but the workflow run kept going until the full 15 minutes had elapsed before
+finally finishing — no error, no duplicate merge, just idle runner time.
+
+**Root cause:** the step was a flat `sleep 900` followed by a single state check at
+the very end. It had no way to notice the PR had already been merged out-of-band
+partway through — it only ever looked once, after the full wait.
+
+**Fix:** replaced the flat sleep with a loop that polls the PR's state every 30
+seconds for up to 15 minutes, exiting immediately the moment the PR is no longer
+`OPEN` (merged or closed manually), instead of only checking at the deadline.
+
+**Commit:** `47ddef4`
+
+---
+
 ## 2026-09-12 — A commit describing `[skip ci]` skipped its own CI run
 
 **Where:** commit `215fd5c` ("replace Flux Image Automation with a CI job for dev's
