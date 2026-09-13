@@ -1,0 +1,99 @@
+name: DB backup (on-demand)
+
+# Manually triggered, plugin-based Barman Cloud backup for one environment's
+# user-management-app-db Cluster. Same Backup CR shape already proven by
+# infrastructure/cnpg/tests/04-backup.sh — this wraps that same tested path so
+# a human (or the scheduled trigger below) can take an on-demand backup without a
+# laptop + kubectl. See docs/postgres-ha-backup-restore.md for how this backup path
+# works, was tested, and its two known restore gotchas.
+#
+# Doesn't touch the live Cluster beyond a WAL/base-backup snapshot pushed to that
+# environment's Azure Blob container (apps/user-management-app/k8s/overlays/<env>/patch.yaml).
+# The standing daily backup (ScheduledBackup, apps/user-management-app/k8s/base/objectstore.yaml)
+# already runs automatically — this is for an extra backup before a risky change, or to
+# verify the pipeline itself works.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to back up"
+        required: true
+        type: choice
+        options: [dev, qa, prod]
+        default: dev
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment == 'prod' && 'production' || inputs.environment }}
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+      - uses: azure/setup-kubectl@v4
+
+      - name: trigger on-demand plugin backup and wait for it to complete
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          NAMESPACE="user-management-app-${ENVIRONMENT}-ns"
+          CLUSTER="user-management-app-db"
+          BACKUP_NAME="ci-backup-${ENVIRONMENT}-${RUN_NUMBER}"
+
+          phase="$(kubectl get cluster "$CLUSTER" -n "$NAMESPACE" -o jsonpath='{.status.phase}')"
+          if [ "$phase" != "Cluster in healthy state" ]; then
+            echo "::error::cluster $CLUSTER in $NAMESPACE is not healthy (phase: $phase) — not taking a backup"
+            exit 1
+          fi
+
+          kubectl apply -f - <<EOF
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Backup
+          metadata:
+            name: ${BACKUP_NAME}
+            namespace: ${NAMESPACE}
+          spec:
+            cluster:
+              name: ${CLUSTER}
+            method: plugin
+            pluginConfiguration:
+              name: barman-cloud.cloudnative-pg.io
+          EOF
+
+          echo "waiting for backup $BACKUP_NAME to reach phase: completed..."
+          waited=0
+          phase=""
+          while [ "$waited" -lt 300 ]; do
+            phase="$(kubectl get backup "$BACKUP_NAME" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+            case "$phase" in
+              completed) break ;;
+              failed)
+                echo "::error::backup $BACKUP_NAME failed: $(kubectl get backup "$BACKUP_NAME" -n "$NAMESPACE" -o jsonpath='{.status.error}')"
+                exit 1
+                ;;
+            esac
+            sleep 5; waited=$((waited + 5))
+          done
+          if [ "$phase" != "completed" ]; then
+            echo "::error::backup $BACKUP_NAME did not complete within 300s (last phase: $phase)"
+            exit 1
+          fi
+
+          {
+            echo "### Backup complete"
+            echo "- environment: \`${ENVIRONMENT}\`"
+            echo "- cluster: \`${CLUSTER}\` (namespace \`${NAMESPACE}\`)"
+            echo "- backup: \`${BACKUP_NAME}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

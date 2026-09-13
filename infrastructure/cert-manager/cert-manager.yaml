@@ -1,0 +1,59 @@
+# cert-manager — https://cert-manager.io  (Apache-2.0, CNCF).
+# Required prerequisite for the CNPG Barman Cloud plugin (../cnpg/barman-cloud-plugin.yaml):
+# the plugin's CNPG-I gRPC endpoint is served over TLS using a cert-manager-issued
+# certificate. Nothing in this repo uses cert-manager for anything else (no app-facing
+# Ingress/TLS yet — see README §4 for that, still plain HTTP via Azure DNS labels).
+#
+# Its own Flux Kustomization ("cert-manager") — same CRD-ordering reason as the other
+# operators in this repo (external-secrets-operator, grafana-operator, cnpg-operator):
+# Flux refuses to apply a Kustomization containing a CR whose CRD isn't registered yet.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: jetstack
+  namespace: cert-manager
+spec:
+  interval: 1h
+  url: https://charts.jetstack.io
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cert-manager
+  namespace: cert-manager
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: cert-manager
+      version: ">=1.14.0 <2.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: jetstack
+        namespace: cert-manager
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  values:
+    crds:
+      enabled: true
+    # Chart default is kube-system, which flux-applier (scoped to this namespace only,
+    # see infrastructure/cnpg/tests/README.md) has no business touching. This is also
+    # the officially recommended fix for exactly this RBAC failure —
+    # https://github.com/cert-manager/cert-manager/issues/8476
+    global:
+      leaderElection:
+        namespace: cert-manager
+    resources:
+      requests: { cpu: 25m, memory: 64Mi }
+      limits:   { cpu: 100m, memory: 192Mi }
+    webhook:
+      resources:
+        requests: { cpu: 10m, memory: 32Mi }
+        limits:   { cpu: 50m, memory: 96Mi }
+    cainjector:
+      resources:
+        requests: { cpu: 10m, memory: 64Mi }
+        limits:   { cpu: 100m, memory: 192Mi }

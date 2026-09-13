@@ -1,0 +1,100 @@
+name: Grafana dashboard drift check
+
+# Grafana lets anyone with edit access change a dashboard from the UI, which would
+# silently drift from what's committed under infrastructure/grafana/json/ (the source
+# of truth — see infrastructure/grafana/kustomization.yaml). This is a read-only diff:
+# on a schedule (and on demand) it pulls the live dashboard JSON via Grafana's HTTP API
+# and opens a PR only if it actually differs from git, so a UI change either gets
+# reviewed back into git or gets reverted by the next Flux reconcile — either way a
+# human decides, this workflow never pushes straight to main.
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 7 * * 1"   # Mondays 07:00 UTC
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+      - uses: azure/setup-kubectl@v4
+
+      - name: fetch live dashboard JSON from Grafana and diff against git
+        id: diff
+        run: |
+          set -euo pipefail
+          # admin_user is the static "admin" set in infrastructure/grafana/grafana.yaml;
+          # only the password is a secret (ExternalSecret grafana-admin, key "password").
+          GRAFANA_USER="admin"
+          GRAFANA_PASS="$(kubectl get secret grafana-admin -n monitoring -o jsonpath='{.data.password}' | base64 -d)"
+
+          kubectl port-forward -n monitoring svc/grafana-service 3000:3000 >/tmp/port-forward.log 2>&1 &
+          PF_PID=$!
+          trap 'kill $PF_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 15); do
+            curl -sf -u "${GRAFANA_USER}:${GRAFANA_PASS}" http://localhost:3000/api/health >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+          changed=0
+          for f in infrastructure/grafana/json/*.json; do
+            name="$(basename "$f" .json)"
+            uid="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('uid',''))" "$f")"
+            if [ -z "$uid" ]; then
+              echo "::warning::$f has no \"uid\" — can't look it up in Grafana's API, skipping drift check for it"
+              continue
+            fi
+            live="$(curl -sf -u "${GRAFANA_USER}:${GRAFANA_PASS}" "http://localhost:3000/api/dashboards/uid/${uid}" | python3 -c "
+          import json, sys
+          doc = json.load(sys.stdin)
+          model = doc['dashboard']
+          model.pop('id', None)
+          model.pop('version', None)
+          print(json.dumps(model, indent=2, sort_keys=True))
+          ")"
+            git_model="$(python3 -c "
+          import json
+          doc = json.load(open('$f'))
+          doc.pop('id', None)
+          doc.pop('version', None)
+          print(json.dumps(doc, indent=2, sort_keys=True))
+          ")"
+            if [ "$live" != "$git_model" ]; then
+              echo "drift detected in $name (uid=$uid)"
+              echo "$live" > "$f"
+              changed=1
+            fi
+          done
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
+      - name: open PR if drift was found
+        if: steps.diff.outputs.changed == '1'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "grafana: pull dashboard drift from live instance"
+          branch: grafana/drift-${{ github.run_number }}
+          title: "Grafana dashboard drift detected"
+          labels: grafana
+          body: |
+            The live Grafana instance's dashboard JSON no longer matches what's
+            committed under `infrastructure/grafana/json/` — someone edited a dashboard
+            from the UI instead of through git.
+
+            This PR pulls the live version back into git so it becomes the new source
+            of truth. **Review the diff carefully**: if this was an unintended change,
+            close this PR instead and let the next Flux reconcile of the `grafana`
+            Kustomization push the git version back out to Grafana.

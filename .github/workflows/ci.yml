@@ -47,7 +47,9 @@ jobs:
             infrastructure/grafana/operator \
             infrastructure/grafana \
             infrastructure/alert \
+            infrastructure/cert-manager \
             infrastructure/cnpg \
+            infrastructure/cnpg/tests/fixture-cluster \
           ; do
             echo "== $d =="
             kustomize build "$d" > /dev/null

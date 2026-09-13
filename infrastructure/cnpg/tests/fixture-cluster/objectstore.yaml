@@ -1,0 +1,43 @@
+# COPY of apps/user-management-app/k8s/base/objectstore.yaml, kept identical on purpose —
+# see ../README.md for why this fixture exists. destinationPath is patched below.
+# Backup destination for the Barman Cloud plugin (../../../../infrastructure/cnpg/barman-cloud-plugin.yaml).
+# Points at an Azure Blob Storage container; credentials come from a Secret that is
+# NOT in git (same rule as every other secret in this repo — see infrastructure/secrets/README.md).
+# Create it once per environment before this ObjectStore can sync:
+#
+#   kubectl create secret generic azure-storage-creds -n <namespace> \
+#     --from-literal=AZURE_STORAGE_ACCOUNT=<storage account name> \
+#     --from-literal=AZURE_STORAGE_KEY=<storage account key>
+#
+# destinationPath's container is overridden per overlay (kustomization.yaml patches) so
+# dev/qa/prod don't share a prefix inside the same storage account.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: user-management-app-db-store
+spec:
+  retentionPolicy: "7d"
+  configuration:
+    destinationPath: "https://CHANGEME.blob.core.windows.net/postgres-backups-base"
+    azureCredentials:
+      storageAccount:
+        name: azure-storage-creds
+        key: AZURE_STORAGE_ACCOUNT
+      storageKey:
+        name: azure-storage-creds
+        key: AZURE_STORAGE_KEY
+---
+# Daily backup, 2am. Same plugin method as the on-demand Backup used in testing
+# (see docs/postgres-ha-backup-restore.md §3.1-3.2) — this is the standing schedule.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: user-management-app-db-daily
+spec:
+  schedule: "0 0 2 * * *"
+  backupOwnerReference: self
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  cluster:
+    name: user-management-app-db

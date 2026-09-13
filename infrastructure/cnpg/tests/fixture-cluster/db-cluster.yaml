@@ -1,3 +1,5 @@
+# COPY of apps/user-management-app/k8s/base/db-cluster.yaml, kept identical on purpose —
+# see ../README.md for why this fixture exists.
 # Postgres, managed by the CloudNativePG operator (infrastructure/cnpg/).
 # On bootstrap it creates database `user-management-app` owned by role `appuser` and a Secret
 # `user-management-app-db-app` (keys: username, password, dbname, host, port, uri, ...). The API

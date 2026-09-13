@@ -1,0 +1,45 @@
+# Barman Cloud CNPG-I plugin — https://cloudnative-pg.io/plugin-barman-cloud
+# (Apache-2.0). Replaces the *deprecated* in-tree `.spec.backup.barmanObjectStore`
+# support (removed entirely in CloudNativePG 1.31) with the plugin architecture: this
+# operator talks to CNPG over a CNPG-I gRPC endpoint, secured by a cert-manager
+# certificate (see ../cert-manager/) — hence "cert-manager" as a prerequisite.
+#
+# Must run in the *same namespace as the CNPG operator itself* (cnpg-system) — that's
+# a hard requirement from the plugin, not a choice made here.
+#
+# Once installed, Clusters opt in per-cluster via `spec.plugins`:
+#
+#   spec:
+#     plugins:
+#       - name: barman-cloud.cloudnative-pg.io
+#         isWALArchiver: true
+#         parameters:
+#           barmanObjectName: <ObjectStore CR name>
+#
+# See apps/user-management-app/k8s/base/db-cluster.yaml and
+# apps/user-management-app/k8s/base/objectstore.yaml for the actual usage, and
+# docs/postgres-ha-backup-restore.md for what was tested.
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: plugin-barman-cloud
+  namespace: cnpg-system
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: plugin-barman-cloud
+      version: ">=0.5.0 <1.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: cloudnative-pg
+        namespace: cnpg-system
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  values:
+    resources:
+      requests: { cpu: 25m, memory: 64Mi }
+      limits:   { cpu: 200m, memory: 256Mi }

@@ -6,6 +6,7 @@ kind: Kustomization
 resources:
   - externalsecret-jwt.yaml
   - db-cluster.yaml
+  - objectstore.yaml
   - db-migrate-job.yaml
   - db-reset-cronjob.yaml
   - api.yaml

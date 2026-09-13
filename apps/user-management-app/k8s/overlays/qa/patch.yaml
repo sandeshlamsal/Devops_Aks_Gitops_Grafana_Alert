@@ -57,3 +57,13 @@ spec:
       remoteRef:
         key: user-management-app/jwt-qa
         property: secret
+---
+# qa's own backup container — see base/objectstore.yaml's header comment for the
+# azure-storage-creds Secret this depends on (created once, manually, not in git)
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: user-management-app-db-store
+spec:
+  configuration:
+    destinationPath: "https://CHANGEME.blob.core.windows.net/postgres-backups-qa"

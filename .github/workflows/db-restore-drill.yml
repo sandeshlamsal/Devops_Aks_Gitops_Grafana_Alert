@@ -1,0 +1,136 @@
+name: DB restore drill
+
+# Manually triggered disaster-recovery drill: proves the latest backup for one
+# environment's user-management-app-db Cluster is actually restorable, by bootstrapping
+# a throwaway Cluster from it and checking the data lands intact — then deleting the
+# throwaway Cluster. This is infrastructure/cnpg/tests/05-restore.sh, callable from
+# Actions.
+#
+# This is NOT an in-place restore of the real Cluster — CNPG doesn't support recovering
+# a Cluster onto itself, only bootstrapping a new one from a backup (see
+# docs/postgres-ha-backup-restore.md §3). To actually recover a lost environment: run
+# this drill's same bootstrap against the environment's ObjectStore with the real
+# Cluster name as `externalClusters[].name`/`serverName`, point the app's Service
+# selector at the new Cluster (or rename it), then remove the old Cluster. That's a
+# manual, reviewed operation — this workflow only verifies the backup is good, it does
+# not perform that cutover.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment whose latest backup to restore-drill"
+        required: true
+        type: choice
+        options: [dev, qa, prod]
+        default: dev
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  restore-drill:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment == 'prod' && 'production' || inputs.environment }}
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+      - uses: azure/setup-kubectl@v4
+
+      - name: restore latest backup into a throwaway Cluster and verify it comes up healthy
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          NAMESPACE="user-management-app-${ENVIRONMENT}-ns"
+          CLUSTER="user-management-app-db"
+          OBJECTSTORE_NAME="${CLUSTER}-store"
+          RESTORE_NAME="${CLUSTER}-drill-${RUN_NUMBER}"
+          DB="user-management-app"
+
+          phase="$(kubectl get cluster "$CLUSTER" -n "$NAMESPACE" -o jsonpath='{.status.phase}')"
+          if [ "$phase" != "Cluster in healthy state" ]; then
+            echo "::error::cluster $CLUSTER in $NAMESPACE is not healthy (phase: $phase) — not drilling against it"
+            exit 1
+          fi
+
+          primary="$(kubectl get cluster "$CLUSTER" -n "$NAMESPACE" -o jsonpath='{.status.currentPrimary}')"
+
+          # Same real gotcha as docs/postgres-ha-backup-restore.md §3.3: don't trust a
+          # backup while the archiver shows an unresolved failure, and force a WAL
+          # switch since a quiet DB may not roll its segment on its own.
+          failed_count="$(kubectl exec -n "$NAMESPACE" "$primary" -c postgres -- psql -U postgres -d "$DB" -tAc "SELECT failed_count FROM pg_stat_archiver;" 2>/dev/null || echo 0)"
+          if [ "${failed_count:-0}" != "0" ]; then
+            echo "::warning::pg_stat_archiver shows $failed_count past archive failure(s) on $CLUSTER — forcing a fresh WAL switch before trusting the backup"
+          fi
+          kubectl exec -n "$NAMESPACE" "$primary" -c postgres -- psql -U postgres -d "$DB" -tAc "SELECT pg_switch_wal();" >/dev/null
+          sleep 5
+
+          echo "bootstrapping restore cluster: $RESTORE_NAME (from ObjectStore $OBJECTSTORE_NAME, server $CLUSTER)"
+          kubectl apply -f - <<EOF
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          metadata:
+            name: ${RESTORE_NAME}
+            namespace: ${NAMESPACE}
+          spec:
+            instances: 1
+            storage:
+              size: 1Gi
+            bootstrap:
+              recovery:
+                source: origin
+            externalClusters:
+              - name: origin
+                plugin:
+                  name: barman-cloud.cloudnative-pg.io
+                  parameters:
+                    barmanObjectName: ${OBJECTSTORE_NAME}
+                    serverName: ${CLUSTER}
+          EOF
+
+          waited=0
+          phase=""
+          while [ "$waited" -lt 300 ]; do
+            phase="$(kubectl get cluster "$RESTORE_NAME" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+            [ "$phase" = "Cluster in healthy state" ] && break
+            if kubectl get pods -n "$NAMESPACE" -l "cnpg.io/cluster=${RESTORE_NAME}" -o jsonpath='{.items[*].status.containerStatuses[*].state.terminated.reason}' 2>/dev/null | grep -q Error; then
+              echo "::error::restore cluster $RESTORE_NAME's recovery job errored"
+              kubectl delete cluster "$RESTORE_NAME" -n "$NAMESPACE" --wait=false || true
+              exit 1
+            fi
+            sleep 5; waited=$((waited + 5))
+          done
+          if [ "$phase" != "Cluster in healthy state" ]; then
+            echo "::error::restore cluster did not become healthy within 300s (last phase: $phase)"
+            kubectl delete cluster "$RESTORE_NAME" -n "$NAMESPACE" --wait=false || true
+            exit 1
+          fi
+          echo "restore cluster healthy after ${waited}s"
+
+          restore_pod="${RESTORE_NAME}-1"
+          expected_count="$(kubectl exec -n "$NAMESPACE" "$primary" -c postgres -- psql -U postgres -d "$DB" -tAc "SELECT count(*) FROM ha_test_marker;" 2>/dev/null || echo "n/a")"
+          restored_count="$(kubectl exec -n "$NAMESPACE" "$restore_pod" -c postgres -- psql -U postgres -d "$DB" -tAc "SELECT count(*) FROM ha_test_marker;" 2>/dev/null || echo "n/a")"
+
+          kubectl delete cluster "$RESTORE_NAME" -n "$NAMESPACE" --wait=false || true
+
+          if [ "$expected_count" != "n/a" ] && [ "$expected_count" != "$restored_count" ]; then
+            echo "::error::row count mismatch: source had $expected_count, restore had $restored_count"
+            exit 1
+          fi
+
+          {
+            echo "### Restore drill passed"
+            echo "- environment: \`${ENVIRONMENT}\`"
+            echo "- restored from: latest backup of \`${CLUSTER}\` (namespace \`${NAMESPACE}\`)"
+            echo "- throwaway cluster \`${RESTORE_NAME}\` came up healthy after ${waited}s, then was deleted"
+            echo "- \`ha_test_marker\` row count: source=${expected_count}, restore=${restored_count}"
+          } >> "$GITHUB_STEP_SUMMARY"
