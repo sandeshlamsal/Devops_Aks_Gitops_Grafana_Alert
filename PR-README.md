@@ -8,6 +8,28 @@ record of those. Newest first. Each entry: what broke, root cause, the fix, the 
 
 ---
 
+## 2026-09-12 — A commit describing `[skip ci]` skipped its own CI run
+
+**Where:** commit `215fd5c` ("replace Flux Image Automation with a CI job for dev's
+tag bump") — pushed to `main`, zero check-runs ever appeared for it.
+
+**Root cause:** the commit's own message *described* the new `bump-dev` job's
+behavior, including the literal text `[skip ci]` as an explanation of the convention
+it uses. GitHub's skip-CI detection does a raw substring scan of the *entire* commit
+message for that marker (and `[ci skip]`, `[no ci]`, etc.) — it has no concept of
+"this is inside a description," it just matches text. Writing about the convention
+invoked the convention.
+
+**Fix:** no code change — just don't put that exact bracketed string in a commit
+message unless you actually mean to skip that commit's own CI run. Confirmed via
+`gh api repos/OWNER/REPO/commits/<sha>/check-runs` returning `total_count: 0`.
+
+**Lesson:** when documenting a skip-CI (or any other magic-string) convention inside a
+commit message itself, don't spell out the literal trigger string — describe it
+without the delimiters, or the description becomes an instance.
+
+---
+
 ## 2026-09-12 — `release.yml`'s tag-push trigger can't OIDC-authenticate (immutable subject claim)
 
 **Where:** `release.yml` / `promote-*.yml`, any `azure/login@v2` step, first real
