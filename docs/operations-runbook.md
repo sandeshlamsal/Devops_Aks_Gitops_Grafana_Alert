@@ -184,9 +184,11 @@ gh workflow run promote-dev.yml
 #    This creates+pushes the real v1.0.0 tag itself as its first step.
 gh workflow run release.yml -f version=v1.0.0
 
-# 3. qa — verifies the tag exists in ACR, opens a PR bumping the qa overlay, arms qa
+# 3. qa — verifies the tag exists in ACR, opens a PR bumping the qa overlay, arms qa.
+#    The PR auto-merges itself 15 minutes after opening (close it within that window
+#    to stop it) — nothing to do here to let it through.
 gh workflow run promote-qa.yml -f version=v1.0.0
-#    merge the PR it opens, then either wait up to 1h (qa's reconcile interval) or:
+#    after the 15-min window + merge, either wait up to 1h (qa's reconcile interval) or:
 flux reconcile kustomization platform-config-user-management-app-qa -n flux-system
 
 # 4. prod — same shape, gated by the "production" GitHub Environment's required reviewers

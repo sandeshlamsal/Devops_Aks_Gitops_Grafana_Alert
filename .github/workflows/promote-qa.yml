@@ -1,11 +1,15 @@
 name: Promote to qa
 
 # Manually triggered: pick a version already built by release.yml (nothing is
-# rebuilt — build once, promote the same artifact). Bumps the qa overlay via a
-# reviewed PR, then arms qa by resuming its Flux Kustomization (ships suspended by
-# default — see clusters/dev/user-management-app-qa.yaml). qa's Kustomization
-# interval is 1h, so once armed, a merged bump lands within an hour — not instantly.
-# Re-run this any time qa needs to be (re-)armed after a manual suspend.
+# rebuilt — build once, promote the same artifact). Bumps the qa overlay via a PR,
+# then arms qa by resuming its Flux Kustomization (ships suspended by default — see
+# clusters/dev/user-management-app-qa.yaml). qa's Kustomization interval is 1h, so
+# once merged, a bump lands within an hour — not instantly.
+#
+# The PR auto-merges itself 15 minutes after opening — no manual click needed — but
+# that 15 minutes IS the review window: close the PR (or push a fix to its branch)
+# any time before then and it won't merge. Re-run this any time qa needs to be
+# (re-)armed after a manual suspend.
 on:
   workflow_dispatch:
     inputs:
@@ -60,6 +64,10 @@ jobs:
             qa's Flux Kustomization is being armed (resumed) by this same workflow run —
             once merged, it reconciles within its 1h interval.
 
+            **This PR auto-merges itself in 15 minutes** — that's the review window, not
+            a formality: close this PR (or push a fix to `release/${{ inputs.version }}-qa`)
+            any time before then and it will not merge.
+
             **Rollback:** revert this PR and merge, or re-run this workflow with the
             previous version — see the root README's "Rollback" section.
 
@@ -73,3 +81,19 @@ jobs:
           NAME="${{ vars.FLUX_KUSTOMIZATION_PREFIX }}user-management-app-qa"
           kubectl -n flux-system patch kustomization "$NAME" --type merge -p '{"spec":{"suspend":false}}'
           kubectl -n flux-system get kustomization "$NAME"
+
+      - name: wait 15 minutes (review window) before auto-merging
+        run: sleep 900
+
+      - name: auto-merge the qa promotion PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ steps.pr.outputs.pull-request-number }}"
+          STATE=$(gh pr view "$PR_NUMBER" --json state -q .state)
+          if [ "$STATE" = "OPEN" ]; then
+            gh pr merge "$PR_NUMBER" --squash --delete-branch
+            echo "merged PR #$PR_NUMBER"
+          else
+            echo "PR #$PR_NUMBER is $STATE (closed or already merged during the review window) — not merging"
+          fi
