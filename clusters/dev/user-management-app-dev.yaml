@@ -4,8 +4,9 @@
 #
 # suspend: true by default — dev deploys nothing until armed by the "Promote to dev"
 # GitHub Actions workflow (.github/workflows/promote-dev.yml), which resumes this
-# Kustomization. Flux Image Automation keeps the dev overlay's image tag current in
-# git regardless of suspend state; suspend only gates whether that gets APPLIED.
+# Kustomization. ci.yml's bump-dev job keeps the dev overlay's image tag current in
+# git regardless of suspend state (commits directly on every push to main); suspend
+# only gates whether that gets APPLIED to the cluster.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:

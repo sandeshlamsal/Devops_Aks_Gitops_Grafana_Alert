@@ -91,8 +91,7 @@ az provider register --namespace Microsoft.KubernetesConfiguration
 
 az k8s-extension create \
   -g san-rg -c san-dev-aks -t managedClusters \
-  --name flux --extension-type microsoft.flux \
-  --config image-automation-controller.enabled=true image-reflector-controller.enabled=true
+  --name flux --extension-type microsoft.flux
 
 az k8s-configuration flux create \
   -g san-rg -c san-dev-aks -t managedClusters \
@@ -109,8 +108,7 @@ az k8s-configuration flux create \
   --kustomization name=cnpg-operator            path=./infrastructure/cnpg            prune=true \
   --kustomization name=user-management-app-dev  path=./apps/user-management-app/k8s/overlays/dev  prune=true dependsOn=\["cnpg-operator","secrets"\] \
   --kustomization name=user-management-app-qa   path=./apps/user-management-app/k8s/overlays/qa   prune=true dependsOn=\["cnpg-operator","secrets"\] \
-  --kustomization name=user-management-app-prod path=./apps/user-management-app/k8s/overlays/prod prune=true dependsOn=\["cnpg-operator","secrets"\] \
-  --kustomization name=flux-image-automation    path=./infrastructure/flux-image-automation prune=true dependsOn=\["secrets"\]
+  --kustomization name=user-management-app-prod path=./apps/user-management-app/k8s/overlays/prod prune=true dependsOn=\["cnpg-operator","secrets"\]
 
 # lock the 3 app envs — the AKS CLI wrapper has no --suspend flag, they come up armed
 for k in dev qa prod; do
@@ -138,9 +136,11 @@ safe) → enable KV v2 + Kubernetes auth → write the policy → seed every val
 ```bash
 bao kv put kv/monitoring/gmail-smtp    password='YOUR_GMAIL_APP_PASSWORD'
 bao kv put kv/monitoring/grafana-admin password='A_STRONG_ADMIN_PASSWORD'
-bao kv put kv/user-management-app/jwt  secret="$(openssl rand -hex 32)"
-# + kv/flux/git-credentials and kv/flux/acr-pull — see
-#   infrastructure/flux-image-automation/README.md
+# one independent JWT signing secret per environment — never share one across envs,
+# see apps/user-management-app/k8s/base/externalsecret-jwt.yaml
+bao kv put kv/user-management-app/jwt-dev  secret="$(openssl rand -hex 32)"
+bao kv put kv/user-management-app/jwt-qa   secret="$(openssl rand -hex 32)"
+bao kv put kv/user-management-app/jwt-prod secret="$(openssl rand -hex 32)"
 ```
 
 ### B6. Confirm the platform converged
@@ -165,8 +165,9 @@ GitHub config, none of it lives in the resource group you just deleted:
    `AZURE_SUBSCRIPTION_ID`, `ACR_NAME`, `AKS_RESOURCE_GROUP`, `AKS_CLUSTER_NAME`,
    `FLUX_KUSTOMIZATION_PREFIX=platform-config-`
 3. Repo → Settings → Environments → `production` (+ optional `qa`)
-4. `kv/flux/git-credentials` and `kv/flux/acr-pull` in OpenBao (part of B5 above if you
-   skipped it there)
+
+No OpenBao secret to seed for the pipeline itself — `bump-dev` (in `ci.yml`) and
+`promote-qa`/`promote-prod`'s overlay-bump commits all use the default `GITHUB_TOKEN`.
 
 ### B8. Arm all three environments — dev, then qa, then prod
 
@@ -175,7 +176,7 @@ This is the step the rest of the repo's docs don't spell out as one sequence —
 all three, in order, with a real release in between:
 
 ```bash
-# 1. dev — arms it; Flux Image Automation takes over from here on every new dev-<N> tag
+# 1. dev — arms it; ci.yml's bump-dev job takes over from here on every push to main
 gh workflow run promote-dev.yml
 
 # 2. cut a real release so qa/prod have an image tag to promote — via workflow_dispatch,

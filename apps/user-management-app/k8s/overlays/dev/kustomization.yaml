@@ -1,10 +1,8 @@
 # dev overlay → namespace user-management-app-dev-ns. Reconciled by clusters/dev/user-management-app-dev.yaml.
 #
-# The `# {"$imagepolicy": ...}` comments are Flux image-automation markers (Setters
-# strategy): image-automation-controller rewrites `newTag` in place and commits it
-# whenever image-reflector-controller sees a newer tag matching the matching ImagePolicy
-# — see infrastructure/flux-image-automation/. CI never edits this file; only Flux does.
-# qa is promoted manually via a release PR instead (apps/user-management-app/k8s/overlays/qa/).
+# newTag below is bumped automatically by ci.yml's bump-dev job on every push to main
+# (commits directly, no PR — dev is the one environment nothing gates). qa and prod
+# are promoted manually instead, via a release PR (apps/user-management-app/k8s/overlays/{qa,prod}/).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: user-management-app-dev-ns
@@ -14,9 +12,9 @@ resources:
 images:
   - name: user-management-app-api
     newName: sanaksregistry.azurecr.io/user-management-app-api
-    newTag: v1 # {"$imagepolicy": "flux-system:user-management-app-api-dev:tag"}
+    newTag: v1
   - name: user-management-app-ui
     newName: sanaksregistry.azurecr.io/user-management-app-ui
-    newTag: v1 # {"$imagepolicy": "flux-system:user-management-app-ui-dev:tag"}
+    newTag: v1
 patches:
   - path: patch.yaml

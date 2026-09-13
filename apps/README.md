@@ -2,9 +2,8 @@
 
 One app, **user-management-app**, deployed to `dev` / `qa` / `prod` namespaces by Flux +
 Kustomize (`base/` + `overlays/<env>/`). Infrastructure (Prometheus, Grafana, alerting,
-secrets, the CNPG operator, Flux Image Automation) is in
-[`infrastructure/`](../infrastructure/); the Flux Kustomizations that tie repo paths to
-the cluster are in [`clusters/dev/`](../clusters/dev/).
+secrets, the CNPG operator) is in [`infrastructure/`](../infrastructure/); the Flux
+Kustomizations that tie repo paths to the cluster are in [`clusters/dev/`](../clusters/dev/).
 
 | App | What it is | Namespaces | Flux Kustomizations |
 |---|---|---|---|
@@ -26,8 +25,9 @@ apps/user-management-app/
 
 - **Images** live in `sanaksregistry.azurecr.io`, built by CI (`.github/workflows/ci.yml`,
   `release.yml`) — see the app README's CI/CD section. Overlays pin the tag via the
-  `images:` transformer; the dev overlay additionally carries `$imagepolicy` marker
-  comments that Flux Image Automation rewrites (`infrastructure/flux-image-automation/`).
+  `images:` transformer; `ci.yml`'s own `bump-dev` job commits the dev overlay's tag
+  bump directly on every push to `main` (same `yq`-edit-and-commit mechanism
+  `promote-qa`/`promote-prod` use for their overlays, just with no PR — nothing gates dev).
 - **ServiceMonitors** ship with the app; Prometheus auto-discovers them
   (`serviceMonitorSelector: {}` in `infrastructure/prometheus/`), so metrics work in any
   namespace with no infra change.

@@ -23,8 +23,8 @@ browser ──▶ user-management-app-ui  (React build, served by nginx)
 | `user-management-app-api` | `user-management-app-api:<tag>` | Node 20 + Express + `pg` + `bcryptjs` + `jsonwebtoken` | `user-management-app-db-rw:5432` |
 | `user-management-app-db` | CNPG default | Postgres via CloudNativePG `Cluster` CR | — |
 
-`<tag>` is `dev-<run_number>` in dev (Flux Image Automation keeps it current),
-`vX.Y.Z` in qa/prod (promoted by hand — see the root README's
+`<tag>` is `dev-<run_number>` in dev (`ci.yml`'s `bump-dev` job keeps it current on
+every push to `main`), `vX.Y.Z` in qa/prod (promoted by hand — see the root README's
 [CI/CD pipeline](../../README.md#6-cicd-pipeline) section).
 
 ---

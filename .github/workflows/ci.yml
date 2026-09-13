@@ -2,8 +2,14 @@ name: CI
 
 # PRs: validate + test + build (no push) — a fast, safe check before merge.
 # push to main: same, plus push the built api/ui images to ACR tagged dev-<run_number>
-# and main-<sha>. Flux image automation then bumps the dev overlay automatically
-# (see infrastructure/flux-image-automation/) — no manual tag edits, no PR for dev.
+# and main-<sha>, then bump-dev commits that tag straight into the dev overlay using
+# the default GITHUB_TOKEN — no manual tag edits, no PR for dev, no PAT to create.
+#
+# (This used to be Flux Image Automation — an in-cluster controller watching ACR and
+# committing the bump itself. That needed its own git-write credential, which is a
+# real GitHub token tied to a real identity either way; a GitHub Actions job gets one
+# for free, scoped to the job's own lifetime, with zero setup. Moved here instead —
+# same job qa/prod's promote-*.yml already do for their own overlay bumps.)
 on:
   pull_request:
     branches: [main]
@@ -42,7 +48,6 @@ jobs:
             infrastructure/grafana \
             infrastructure/alert \
             infrastructure/cnpg \
-            infrastructure/flux-image-automation \
           ; do
             echo "== $d =="
             kustomize build "$d" > /dev/null
@@ -130,3 +135,30 @@ jobs:
           image-ref: ${{ vars.ACR_NAME }}.azurecr.io/${{ matrix.image }}:main-${{ github.sha }}
           severity: CRITICAL,HIGH
           exit-code: "0"   # report only — flip to "1" once the baseline is clean
+
+  bump-dev:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: bump dev overlay to dev-${{ github.run_number }}
+        run: |
+          curl -sL https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+          yq -i '(.images[] | select(.name == "user-management-app-api") | .newTag) = strenv(TAG)' apps/user-management-app/k8s/overlays/dev/kustomization.yaml
+          yq -i '(.images[] | select(.name == "user-management-app-ui")  | .newTag) = strenv(TAG)' apps/user-management-app/k8s/overlays/dev/kustomization.yaml
+        env:
+          TAG: dev-${{ github.run_number }}
+      - name: commit + push (direct to main — dev needs no PR, same as before)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git diff --quiet -- apps/user-management-app/k8s/overlays/dev/kustomization.yaml && { echo "no change, skipping"; exit 0; }
+          git add apps/user-management-app/k8s/overlays/dev/kustomization.yaml
+          # [skip ci] is a GitHub-native convention — this commit's own push does NOT
+          # trigger another CI run, so there's no bump-dev -> push -> bump-dev loop.
+          git commit -m "bump dev to dev-${{ github.run_number }} [skip ci]"
+          git push origin HEAD:main

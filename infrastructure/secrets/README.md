@@ -226,22 +226,19 @@ kubectl -n openbao exec openbao-0 -- sh -c '
   bao secrets enable -path=kv kv-v2
   bao auth enable kubernetes
   bao write auth/kubernetes/config kubernetes_host=https://kubernetes.default.svc
-  printf "path \"kv/data/monitoring/*\" { capabilities = [\"read\"] }\npath \"kv/data/user-management-app/*\" { capabilities = [\"read\"] }\npath \"kv/data/flux/*\" { capabilities = [\"read\"] }\n" | bao policy write eso-monitoring -
+  printf "path \"kv/data/monitoring/*\" { capabilities = [\"read\"] }\npath \"kv/data/user-management-app/*\" { capabilities = [\"read\"] }\n" | bao policy write eso-monitoring -
   bao write auth/kubernetes/role/external-secrets \
       bound_service_account_names=external-secrets \
       bound_service_account_namespaces=external-secrets \
       policies=eso-monitoring ttl=1h
-  # seed the values
+  # seed the values — one independent JWT secret per environment, never shared
   bao kv put kv/monitoring/gmail-smtp    password="YOUR_GMAIL_APP_PASSWORD"
   bao kv put kv/monitoring/grafana-admin password="A_STRONG_ADMIN_PASSWORD"
-  bao kv put kv/user-management-app/jwt  secret="$(openssl rand -hex 32)"          # API JWT signing key
-  bao kv put kv/flux/git-credentials     username="<github-username>" password="<GITHUB_PAT>"  # Flux image automation git write-back
-  bao kv put kv/flux/acr-pull            username="flux-pull-token"   password="<ACR_TOKEN>"   # image-reflector-controller ACR reads
+  bao kv put kv/user-management-app/jwt-dev  secret="$(openssl rand -hex 32)"
+  bao kv put kv/user-management-app/jwt-qa   secret="$(openssl rand -hex 32)"
+  bao kv put kv/user-management-app/jwt-prod secret="$(openssl rand -hex 32)"
 '
 ```
-
-> `kv/flux/*` is only needed if you deploy `infrastructure/flux-image-automation/` — see
-> its own README for how to generate the PAT and ACR token.
 
 Within a minute ESO creates `gmail-smtp-secret`, `grafana-admin` and (per user-management-app
 namespace) `user-management-app-jwt`, and `secrets` → `grafana` / `alert` / `user-management-app-*` go
