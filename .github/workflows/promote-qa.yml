@@ -82,18 +82,22 @@ jobs:
           kubectl -n flux-system patch kustomization "$NAME" --type merge -p '{"spec":{"suspend":false}}'
           kubectl -n flux-system get kustomization "$NAME"
 
-      - name: wait 15 minutes (review window) before auto-merging
-        run: sleep 900
-
-      - name: auto-merge the qa promotion PR
+      - name: wait up to 15 minutes (review window), then auto-merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR_NUMBER="${{ steps.pr.outputs.pull-request-number }}"
-          STATE=$(gh pr view "$PR_NUMBER" --json state -q .state)
-          if [ "$STATE" = "OPEN" ]; then
-            gh pr merge "$PR_NUMBER" --squash --delete-branch
-            echo "merged PR #$PR_NUMBER"
-          else
-            echo "PR #$PR_NUMBER is $STATE (closed or already merged during the review window) — not merging"
-          fi
+          DEADLINE=$(( $(date +%s) + 900 ))
+          # poll instead of a flat sleep — if someone merges or closes the PR manually
+          # (see PR-README.md) partway through, stop immediately rather than idling
+          # out the rest of the 15 minutes on a runner for no reason.
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            STATE=$(gh pr view "$PR_NUMBER" --json state -q .state)
+            if [ "$STATE" != "OPEN" ]; then
+              echo "PR #$PR_NUMBER is $STATE (merged or closed during the review window) — stopping early, nothing more to do"
+              exit 0
+            fi
+            sleep 30
+          done
+          gh pr merge "$PR_NUMBER" --squash --delete-branch
+          echo "merged PR #$PR_NUMBER"
