@@ -3,12 +3,23 @@
 # `user-management-app-db-app` (keys: username, password, dbname, host, port, uri, ...). The API
 # and the migrate/reset jobs read the `uri` key as DATABASE_URL.
 # Services created by CNPG: user-management-app-db-rw (primary), -ro, -r.
+#
+# instances: 3 → 1 primary + 2 streaming replicas, automatic failover. Tested (forced
+# primary kill): ~16-18s to promotion decision, ~40s to fully healthy again, zero data
+# loss. See docs/postgres-ha-backup-restore.md for the full test.
+#
+# plugins.barman-cloud → continuous WAL archiving + backup/restore via the Barman Cloud
+# CNPG-I plugin (infrastructure/cnpg/barman-cloud-plugin.yaml), against the ObjectStore
+# `user-management-app-db-store` (objectstore.yaml, next to this file). Tested: on-demand
+# backup, and restore into a fresh cluster with full data integrity — including two real
+# restore gotchas documented in docs/postgres-ha-backup-restore.md (WAL-not-yet-archived,
+# and a backup taken right after a failover missing its timeline history file).
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
   name: user-management-app-db
 spec:
-  instances: 1
+  instances: 3
   storage:
     size: 1Gi
   bootstrap:
@@ -22,3 +33,8 @@ spec:
     limits:
       cpu: 500m
       memory: 512Mi
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: user-management-app-db-store
