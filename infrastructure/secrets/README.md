@@ -253,6 +253,54 @@ target Secret lands in.
 
 ---
 
+## Back up the unseal keys + root token
+
+`bao operator init` prints the 5 unseal keys and the root token **once** — OpenBao
+itself never stores the root key (see [Seal / unseal](#seal--unseal--the-concept)
+above), so if you lose 3+ of those 5 shares, everything on `data-openbao-0` is
+permanently unrecoverable. Copy them out of the terminal immediately; don't rely on
+shell scrollback surviving.
+
+This deployment's copy lives in an **Azure Key Vault**, alongside the Grafana admin
+password (same OpenBao path, `kv/monitoring/grafana-admin`) seeded in the bootstrap
+block above:
+
+```bash
+# one-time: vault + your account's data-plane role on it
+az provider register --namespace Microsoft.KeyVault   # if not already registered
+az keyvault create -g san-rg -n san-dev-secrets-kv -l eastus2
+MY_OID=$(az ad signed-in-user show --query id -o tsv)
+KV_ID=$(az keyvault show -g san-rg -n san-dev-secrets-kv --query id -o tsv)
+az role assignment create --role "Key Vault Secrets Officer" --assignee "$MY_OID" --scope "$KV_ID"
+
+# store each value (RBAC-mode vault — give the role assignment ~1 min to propagate first)
+az keyvault secret set --vault-name san-dev-secrets-kv -n openbao-root-token     --value '<ROOT_TOKEN>'
+az keyvault secret set --vault-name san-dev-secrets-kv -n openbao-unseal-key-1  --value '<KEY_1>'
+az keyvault secret set --vault-name san-dev-secrets-kv -n openbao-unseal-key-2  --value '<KEY_2>'
+az keyvault secret set --vault-name san-dev-secrets-kv -n openbao-unseal-key-3  --value '<KEY_3>'
+az keyvault secret set --vault-name san-dev-secrets-kv -n openbao-unseal-key-4  --value '<KEY_4>'
+az keyvault secret set --vault-name san-dev-secrets-kv -n openbao-unseal-key-5  --value '<KEY_5>'
+az keyvault secret set --vault-name san-dev-secrets-kv -n grafana-admin-password --value '<GRAFANA_PW>'
+```
+
+Retrieve later:
+
+```bash
+az keyvault secret show --vault-name san-dev-secrets-kv -n openbao-root-token --query value -o tsv
+# swap the name for: openbao-unseal-key-1..5, grafana-admin-password
+```
+
+This Key Vault is a manual, out-of-band backup copy — it isn't wired into Flux, ESO, or
+any auto-unseal flow, so a fresh bootstrap after a real Tier ≥ 2 rebuild still generates
+new keys as normal (§ above). It exists purely so the *current* cluster's OpenBao isn't
+one lost terminal scrollback away from permanently losing its data. If you outgrow
+manual unseal entirely, this same Key Vault is also the natural target for the
+[Auto-unseal (production)](#auto-unseal-production--master-key-held-by-a-kms) setup
+further down — that section already uses Azure Key Vault, just for wrapping the root
+key instead of storing a copy of it.
+
+---
+
 ## Add a new secret — worked examples
 
 ### Example 1 — a single-field secret (like the two we have)
