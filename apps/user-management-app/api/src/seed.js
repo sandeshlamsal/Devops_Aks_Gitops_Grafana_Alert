@@ -5,11 +5,11 @@ const bcrypt = require("bcryptjs");
 const { pool } = require("./db");
 
 const USERS = [
-  { username: "admin",   full_name: "Ada Admin",      email: "admin@example.com" },
-  { username: "bwayne",  full_name: "Bruce Wayne",    email: "bruce@example.com" },
-  { username: "ckent",   full_name: "Clark Kent",     email: "clark@example.com" },
-  { username: "dprince", full_name: "Diana Prince",   email: "diana@example.com" },
-  { username: "bbanner", full_name: "Bruce Banner",   email: "bruce.b@example.com" },
+  { username: "admin",   full_name: "Ada Admin",      email: "admin@example.com",   is_admin: true },
+  { username: "bwayne",  full_name: "Bruce Wayne",    email: "bruce@example.com",   is_admin: false },
+  { username: "ckent",   full_name: "Clark Kent",     email: "clark@example.com",   is_admin: false },
+  { username: "dprince", full_name: "Diana Prince",   email: "diana@example.com",   is_admin: false },
+  { username: "bbanner", full_name: "Bruce Banner",   email: "bruce.b@example.com", is_admin: false },
 ];
 
 async function seedUsers() {
@@ -18,10 +18,10 @@ async function seedUsers() {
   try {
     for (const u of USERS) {
       await c.query(
-        `INSERT INTO users (username, password_hash, full_name, email)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO users (username, password_hash, full_name, email, is_admin)
+         VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (username) DO NOTHING`,
-        [u.username, hash, u.full_name, u.email]
+        [u.username, hash, u.full_name, u.email, u.is_admin]
       );
     }
     const { rows } = await c.query("SELECT count(*)::int AS n FROM users");
