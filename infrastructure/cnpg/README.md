@@ -30,3 +30,9 @@ kubectl -n user-management-app-dev-ns exec -it user-management-app-db-1 -- psql 
 
 Bump `spec.instances` (adds replicas + failover), add `spec.backup` with an object-store
 (Azure Blob) for PITR, add `monitoring: { enablePodMonitor: true }` for Prometheus.
+
+Both `spec.instances` and `spec.backup` have been tested end-to-end (scale-up, forced
+failover, on-demand backup, and restore into a fresh cluster) with real timings and two
+real restore gotchas documented — see
+[`docs/postgres-ha-backup-restore.md`](../../docs/postgres-ha-backup-restore.md) before
+adopting either in a real environment.
