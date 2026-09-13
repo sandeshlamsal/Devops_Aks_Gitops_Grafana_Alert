@@ -1,0 +1,21 @@
+# Test-only fixture: deploys JUST the Postgres pieces (Cluster + ObjectStore) from
+# apps/user-management-app/k8s/base, skipping the app/JWT/OpenBao dependency chain the
+# real overlays (../../../apps/user-management-app/k8s/overlays/{dev,qa,prod}) pull in.
+# Exists so the test suite in ../ can exercise HA/backup/restore through Flux, on a
+# minimal cluster, without needing the whole app stack running too. NOT a real
+# environment — do not point production traffic at anything this creates.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: postgres-test
+resources:
+  - namespace.yaml
+  - db-cluster.yaml
+  - objectstore.yaml
+patches:
+  - target:
+      kind: ObjectStore
+      name: user-management-app-db-store
+    patch: |
+      - op: replace
+        path: /spec/configuration/destinationPath
+        value: "https://sanpgbackupsdev.blob.core.windows.net/postgres-backups-dev"
