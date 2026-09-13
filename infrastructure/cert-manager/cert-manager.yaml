@@ -43,8 +43,9 @@ spec:
     # see infrastructure/cnpg/tests/README.md) has no business touching. This is also
     # the officially recommended fix for exactly this RBAC failure —
     # https://github.com/cert-manager/cert-manager/issues/8476
-    leaderElection:
-      namespace: cert-manager
+    global:
+      leaderElection:
+        namespace: cert-manager
     resources:
       requests: { cpu: 25m, memory: 64Mi }
       limits:   { cpu: 100m, memory: 192Mi }
