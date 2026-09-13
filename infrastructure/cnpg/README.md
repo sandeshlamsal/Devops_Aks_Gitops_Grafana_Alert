@@ -2,7 +2,12 @@
 
 Installs the **CloudNativePG** operator (Helm, namespace `cnpg-system`) via its own Flux
 Kustomization `cnpg-operator`. It reconciles `postgresql.cnpg.io` `Cluster` CRs into a
-running Postgres.
+running Postgres. Also installs the **Barman Cloud CNPG-I plugin**
+(`barman-cloud-plugin.yaml`, same Kustomization, same namespace — a hard requirement of
+the plugin) for HA backup/restore to Azure Blob Storage — see `tests/README.md` and
+[`docs/postgres-ha-backup-restore.md`](../../docs/postgres-ha-backup-restore.md).
+Requires `infrastructure/cert-manager/` as a prerequisite (the plugin's gRPC endpoint is
+TLS-secured via cert-manager).
 
 The `user-management-app` app's DB is a `Cluster` CR per namespace
 (`apps/user-management-app/k8s/base/db-cluster.yaml`). For each one the operator creates:
@@ -28,11 +33,12 @@ kubectl -n user-management-app-dev-ns exec -it user-management-app-db-1 -- psql 
 
 ## Grow / HA later
 
-Bump `spec.instances` (adds replicas + failover), add `spec.backup` with an object-store
-(Azure Blob) for PITR, add `monitoring: { enablePodMonitor: true }` for Prometheus.
+Bump `spec.instances` (adds replicas + failover), add `spec.plugins` with the Barman
+Cloud plugin + an `ObjectStore` for backup/restore, add
+`monitoring: { enablePodMonitor: true }` for Prometheus.
 
-Both `spec.instances` and `spec.backup` have been tested end-to-end (scale-up, forced
-failover, on-demand backup, and restore into a fresh cluster) with real timings and two
-real restore gotchas documented — see
-[`docs/postgres-ha-backup-restore.md`](../../docs/postgres-ha-backup-restore.md) before
-adopting either in a real environment.
+Both `spec.instances` and the Barman Cloud plugin have been tested end-to-end — scale-up,
+forced failover, on-demand backup, and restore into a fresh cluster, deployed through
+Flux the same way this whole repo works, with real timings — see
+[`docs/postgres-ha-backup-restore.md`](../../docs/postgres-ha-backup-restore.md) and the
+runnable test suite in [`tests/`](tests/) before adopting either in a real environment.
