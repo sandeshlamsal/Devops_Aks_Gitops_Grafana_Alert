@@ -1,0 +1,66 @@
+name: Grafana dashboard validate
+
+# PR check: every dashboard JSON under infrastructure/grafana/json/ must be valid JSON
+# and look like an actual exported Grafana dashboard model (has the fields the operator
+# / configMapGenerator setup expects), and infrastructure/grafana must still
+# `kustomize build` cleanly (catches a json/ file added but not listed under
+# kustomization.yaml's configMapGenerator.files, or a dashboard.yaml key mismatch).
+# See infrastructure/grafana/kustomization.yaml for how a new dashboard gets wired in.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "infrastructure/grafana/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: validate dashboard JSON shape
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(infrastructure/grafana/json/*.json)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no dashboard JSON files found under infrastructure/grafana/json/"
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            echo "== $f =="
+            python3 -c "
+          import json, sys
+          path = sys.argv[1]
+          with open(path) as fh:
+              doc = json.load(fh)
+          for key in ('title', 'panels'):
+              if key not in doc:
+                  sys.exit(f'{path}: missing required top-level key \"{key}\" — is this a real exported dashboard model?')
+          if not isinstance(doc['panels'], list):
+              sys.exit(f'{path}: \"panels\" is not a list')
+          print(f'{path}: OK — title=\"{doc[\"title\"]}\", {len(doc[\"panels\"])} panel(s)')
+          " "$f"
+          done
+
+      - name: every json/ file must be wired into kustomization.yaml's configMapGenerator
+        run: |
+          set -euo pipefail
+          for f in infrastructure/grafana/json/*.json; do
+            name="$(basename "$f")"
+            grep -q "json/${name}" infrastructure/grafana/kustomization.yaml || {
+              echo "::error::infrastructure/grafana/json/${name} is not listed under configMapGenerator.files in infrastructure/grafana/kustomization.yaml"
+              exit 1
+            }
+          done
+
+      - name: install kustomize
+        run: |
+          curl -sL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" | tar xz
+          sudo mv kustomize /usr/local/bin/
+
+      - name: kustomize build infrastructure/grafana
+        run: kustomize build infrastructure/grafana > /dev/null

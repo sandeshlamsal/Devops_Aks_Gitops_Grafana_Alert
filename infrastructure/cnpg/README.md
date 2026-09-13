@@ -42,3 +42,11 @@ forced failover, on-demand backup, and restore into a fresh cluster, deployed th
 Flux the same way this whole repo works, with real timings — see
 [`docs/postgres-ha-backup-restore.md`](../../docs/postgres-ha-backup-restore.md) and the
 runnable test suite in [`tests/`](tests/) before adopting either in a real environment.
+
+## Pipelines
+
+The manual/scripted operations above are also available as GitHub Actions workflows —
+[`db-backup.yml`](../../.github/workflows/db-backup.yml),
+[`db-restore-drill.yml`](../../.github/workflows/db-restore-drill.yml), and
+[`db-test-suite.yml`](../../.github/workflows/db-test-suite.yml) — see
+`docs/postgres-ha-backup-restore.md` §6 for what each one wraps and its approval gates.

@@ -1,0 +1,70 @@
+name: DB HA/backup/restore test suite
+
+# Manually triggered run of infrastructure/cnpg/tests/run-all.sh (connectivity,
+# replication, forced failover, backup, restore) against one environment's live
+# Cluster — the same suite documented in docs/postgres-ha-backup-restore.md §5.
+#
+# 03-ha-failover.sh force-kills the current primary pod. That's fine against dev, which
+# is what this workflow defaults to and what CI can run unattended. Running it against
+# qa/prod requires deliberately checking "I understand this kills the primary pod" —
+# the job refuses to proceed against a non-dev environment without it, on top of the
+# `production` GitHub Environment's own reviewer gate for prod.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to test"
+        required: true
+        type: choice
+        options: [dev, qa, prod]
+        default: dev
+      confirm_failover_test:
+        description: "Required for qa/prod: type exactly \"I understand this kills the primary pod\" to allow 03-ha-failover.sh to run there"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test-suite:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment == 'prod' && 'production' || inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: guard the destructive failover test on qa/prod
+        if: ${{ inputs.environment != 'dev' && inputs.confirm_failover_test != 'I understand this kills the primary pod' }}
+        run: |
+          echo "::error::running the test suite against '${{ inputs.environment }}' forces the current primary pod to fail over (03-ha-failover.sh). Re-run with confirm_failover_test set to exactly: I understand this kills the primary pod"
+          exit 1
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+      - uses: azure/setup-kubectl@v4
+
+      - name: run infrastructure/cnpg/tests/run-all.sh
+        env:
+          NAMESPACE: user-management-app-${{ inputs.environment }}-ns
+          CLUSTER: user-management-app-db
+        run: |
+          cd infrastructure/cnpg/tests
+          ./run-all.sh | tee /tmp/test-suite.log
+
+      - name: summary
+        if: always()
+        run: |
+          {
+            echo "### DB test suite — ${{ inputs.environment }}"
+            echo '```'
+            tail -n 20 /tmp/test-suite.log 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

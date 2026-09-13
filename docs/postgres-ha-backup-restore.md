@@ -4,10 +4,10 @@ Everything in this doc was tested live against a real CloudNativePG cluster, dep
 the same way the team would deploy it — **through Flux/GitOps**, not `kubectl apply` by
 hand — on a throwaway dev AKS cluster. Nothing here is theoretical — every number,
 every failure mode, and every fix below was observed, not looked up. The environment
-has since been torn down; this doc plus the proposed config diff (§6) and the
+has since been torn down; this doc plus the proposed config diff (§8) and the
 [automated test suite](../infrastructure/cnpg/tests/) are what's left to review.
 
-**Ask: review §5 (recommendation) and §6 (config diff), approve or push back.**
+**Ask: review §7 (recommendation) and §8 (config diff), approve or push back.**
 
 **Revision note:** an earlier version of this doc tested the *native*
 `spec.backup.barmanObjectStore` config. That path is deprecated upstream and is dropped
@@ -234,7 +234,39 @@ just once here in a throwaway dev cluster.
 
 ---
 
-## 6. Recommendation
+## 6. Pipelines built on top of this
+
+Three of the manual/scripted steps above are now GitHub Actions workflows, so they
+don't require anyone with `kubectl` access on their laptop:
+
+| Workflow | Wraps | Trigger | Gate |
+|---|---|---|---|
+| [`db-backup.yml`](../.github/workflows/db-backup.yml) | the exact `Backup` CR from `tests/04-backup.sh` | `workflow_dispatch`, pick dev/qa/prod | `production` GitHub Environment for prod |
+| [`db-restore-drill.yml`](../.github/workflows/db-restore-drill.yml) | `tests/05-restore.sh` — restore latest backup into a throwaway `Cluster`, verify row counts, delete it | `workflow_dispatch`, pick dev/qa/prod | `production` GitHub Environment for prod |
+| [`db-test-suite.yml`](../.github/workflows/db-test-suite.yml) | `tests/run-all.sh` (all 5 scripts) | `workflow_dispatch`, pick dev/qa/prod | `production` Environment for prod, **plus** a typed confirmation phrase for qa/prod since `03-ha-failover.sh` force-kills the primary pod |
+
+None of these three build or deploy anything — they only exercise a `Cluster` that Flux
+already reconciled. `db-restore-drill.yml` is explicitly a **verification drill**, not a
+recovery tool: it proves a backup is restorable by standing up a disposable `Cluster`
+and tearing it down again; an actual environment recovery (cutting real traffic over to
+a restored cluster) is a manual, reviewed operation, same as any other production
+incident response.
+
+Two more cover the Grafana side (dashboard JSON lives in git — see
+[`infrastructure/grafana/kustomization.yaml`](../infrastructure/grafana/kustomization.yaml)):
+
+| Workflow | Purpose | Trigger |
+|---|---|---|
+| [`grafana-dashboard-validate.yml`](../.github/workflows/grafana-dashboard-validate.yml) | PR check: every `infrastructure/grafana/json/*.json` is valid, shaped like a real dashboard export, wired into `kustomization.yaml`'s `configMapGenerator`, and the whole `infrastructure/grafana` kustomization still builds | PR touching `infrastructure/grafana/**` |
+| [`grafana-dashboard-drift-check.yml`](../.github/workflows/grafana-dashboard-drift-check.yml) | catches dashboards edited from the Grafana UI instead of git: pulls the live JSON via Grafana's HTTP API, diffs against git, opens a PR if they differ (never pushes to `main` directly) | weekly schedule + `workflow_dispatch` |
+
+`ci.yml`'s `kustomize build` validation loop was also extended to cover
+`infrastructure/cert-manager` and `infrastructure/cnpg/tests/fixture-cluster`, which
+were added by this change but hadn't been in that loop yet.
+
+---
+
+## 7. Recommendation
 
 - **HA: recommend adopting.** Clean, fast, automatic, zero data loss across two
   independent test runs, and the cost is just more of the same compute/storage already
@@ -253,7 +285,7 @@ just once here in a throwaway dev cluster.
 
 ---
 
-## 7. Proposed config diff
+## 8. Proposed config diff
 
 ```diff
  apiVersion: postgresql.cnpg.io/v1

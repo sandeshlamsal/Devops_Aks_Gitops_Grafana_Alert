@@ -160,6 +160,11 @@ infrastructure/
   promote-dev.yml             arm dev's Flux Kustomization (+ optional manual tag pin)
   promote-qa.yml               verify → bump qa overlay (PR, auto-merges in 15m) → arm qa
   promote-prod.yml             verify → bump prod overlay (PR, environment-gated) → arm prod
+  db-backup.yml                 on-demand Postgres backup (Barman Cloud plugin) for dev/qa/prod
+  db-restore-drill.yml          restore latest backup into a throwaway Cluster, verify, delete it
+  db-test-suite.yml             run infrastructure/cnpg/tests/ (HA/backup/restore) against an env
+  grafana-dashboard-validate.yml     PR check: dashboard JSON is valid + wired into kustomization.yaml
+  grafana-dashboard-drift-check.yml  weekly: diff live Grafana dashboards against git, PR if they drifted
 
 clusters/dev/                 human-readable copies of the Flux Kustomizations (see §3.5)
 ```
