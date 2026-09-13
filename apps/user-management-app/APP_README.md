@@ -26,6 +26,12 @@ Every environment ships with the same 5 demo accounts, all sharing the password
 | `dprince` | Diana Prince | no |
 | `bbanner` | Bruce Banner | no |
 
+**dev only** also seeds one extra fixture, `DevUser1` (not an admin) — a dev-only test
+account that will never appear in qa or prod, no matter how many times any environment
+is destroyed and recreated. Same image runs everywhere; the seeding logic checks which
+environment it's actually running in (`api/src/seed.js`'s `DEV_ONLY_USERS`) rather than
+this being a different build per environment.
+
 The sign-in page heading tells you which environment you're on at a glance — **"Sign
 in DEV env"**, **"Sign in QA env"**, or **"Sign in PROD env"**, in red — so it's never
 ambiguous which one you're looking at, even with all three open in different tabs.

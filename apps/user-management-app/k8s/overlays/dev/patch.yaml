@@ -25,6 +25,20 @@ spec:
             - name: APP_ENV
               value: dev
 ---
+# so seedUsers() knows this is dev — see api/src/seed.js's DEV_ONLY_USERS
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: user-management-app-db-migrate
+spec:
+  template:
+    spec:
+      containers:
+        - name: migrate
+          env:
+            - name: APP_ENV
+              value: dev
+---
 apiVersion: v1
 kind: Service
 metadata:

@@ -22,6 +22,8 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef: { name: user-management-app-db-app, key: uri }
+            - name: APP_ENV
+              value: base   # overlay patch.yaml overrides this to dev / qa / prod — see seed.js
           resources:
             requests: { cpu: 25m, memory: 64Mi }
             limits: { cpu: 200m, memory: 192Mi }
