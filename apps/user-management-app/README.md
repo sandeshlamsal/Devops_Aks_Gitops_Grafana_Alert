@@ -159,6 +159,68 @@ It runs `node src/migrate.js --reset && node src/seed.js` →
 namespace's DB is touched. This is also the fastest fix for "the DB is in a bad state" —
 see the root README's [Rollback](../../README.md#10-rollback) section.
 
+### Common scenarios
+
+**Add a schema change** — drop a new `NNN_name.sql` in `api/migrations/`, next number
+up. Never edit an already-shipped migration file, even to fix it — the runner tracks
+*filenames* in `schema_migrations`, so editing a file already recorded there does
+nothing on a database that's already run it. If existing rows need fixing up too (not
+just new columns), write that as a data migration in the *new* file — see
+`003_backfill_admin_flag.sql` for a real example: `002_user_roles.sql` added
+`is_admin` (defaulting every existing row to `false`, including `admin`), and because
+`seedUsers()`'s `ON CONFLICT DO NOTHING` never touches a row that already exists, every
+already-seeded environment ended up with an `admin` that wasn't actually an admin.
+`003` backfills it with a plain `UPDATE`.
+
+**Add a fixture used in every environment** — add an entry to `BASE_USERS` in
+`api/src/seed.js`. Safe to re-run (`ON CONFLICT DO NOTHING`); no migration needed,
+this is data, not schema.
+
+**Add a fixture for one environment only** — don't put it in `BASE_USERS`. The exact
+same built image runs in dev/qa/prod, so anything in there seeds *everywhere*. Instead
+add it to `DEV_ONLY_USERS` (or a same-shaped `QA_ONLY_USERS`/`PROD_ONLY_USERS` if you
+need one) and gate it on `process.env.APP_ENV`, the same runtime-environment-check
+pattern already used for the API's behavior and the UI's sign-in heading — one image,
+different behavior per environment, decided at container start, never at build time.
+The migrate Job needs `APP_ENV` wired to it per overlay for this to work (already done
+in `k8s/base/db-migrate-job.yaml` + each `overlays/*/patch.yaml`) — it's easy to forget
+this specifically for the migrate Job since the API/UI containers already had it and
+it's tempting to assume the Job does too.
+
+**Destroy and recreate an environment — what comes back, what doesn't.** Each
+environment's CloudNativePG `Cluster` owns its own PVC (`ownerReferences`, `controller:
+true`) on a `Delete`-reclaim-policy StorageClass — deleting the `Cluster` (which is
+what happens when that environment's Flux Kustomization is deleted with `prune: true`)
+cascades: PVC garbage-collected → underlying Azure Disk deleted → **all data gone**,
+including the WAL archive (there's no separate `walStorage` volume configured, so WAL
+lives on the same disk as the actual data — nothing to fall back on). What *does* come
+back: whatever's in `seed.js`, because `migrate` + `seedUsers()` run fresh against the
+new empty database. Anything added afterward through the UI (or the API directly) and
+never added to `seed.js` is gone permanently. This is intentional for dev — disposable,
+fully reproducible from git — but the same mechanics apply to qa/prod too, which is why
+their Kustomizations are never included in any teardown scripts in this repo.
+
+**Scaling `instances` on a `Cluster`** — each additional instance gets **its own
+full-size PVC**, provisioned automatically, populated via Postgres streaming
+replication (a one-shot "join" pod runs a base backup from the primary into the new
+replica's disk before it starts). Storage cost is `instances × storage.size`, not
+shared — confirmed live by scaling dev from 1→2 instances and watching a second,
+independently-sized PVC appear. Postgres itself enforces this: only one running
+process can ever own a given PGDATA directory, so "share one PVC across instances"
+isn't a configuration option, it's a hard constraint of how Postgres works. Scaling
+back down removes that instance's PVC too — the primary's own disk (and its data) is
+never touched by scaling replicas up or down.
+
+**Want qa/prod data to survive an accidental deletion?** Neither of the two mechanisms
+above protects against it today — everything in this repo currently uses the same
+`Delete`-reclaim-policy StorageClass everywhere. Two real options, not yet implemented:
+a separate `Retain`-policy StorageClass for qa/prod (prevents the disk itself from
+being destroyed, but recovering onto a new `Cluster` after a real deletion is a manual
+step), or CNPG's native continuous backup to Azure Blob Storage (the actual
+disaster-recovery answer — survives losing the disk entirely, restorable via
+`bootstrap: recovery`). Worth doing before this repo runs anything that isn't
+throwaway data.
+
 ---
 
 ## Unit & integration tests
