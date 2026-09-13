@@ -20,3 +20,15 @@ metadata:
   annotations:
     # → user-management-prod.eastus2.cloudapp.azure.com
     service.beta.kubernetes.io/azure-dns-label-name: user-management-prod
+---
+# own JWT signing secret — see base/externalsecret-jwt.yaml's header comment for why
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: user-management-app-jwt
+spec:
+  data:
+    - secretKey: secret
+      remoteRef:
+        key: user-management-app/jwt-prod
+        property: secret
