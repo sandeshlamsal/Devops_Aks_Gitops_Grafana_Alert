@@ -10,9 +10,9 @@ resources:
 images:
   - name: user-management-app-api
     newName: sanaksregistry.azurecr.io/user-management-app-api
-    newTag: v1
+    newTag: v1.0.0
   - name: user-management-app-ui
     newName: sanaksregistry.azurecr.io/user-management-app-ui
-    newTag: v1
+    newTag: v1.0.0
 patches:
   - path: patch.yaml
