@@ -36,6 +36,15 @@ jobs:
           cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
       - uses: azure/setup-kubectl@v4
 
+      - name: ensure the "incident" label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # gh issue create --label fails outright if the label doesn't exist yet —
+        # create it idempotently rather than requiring a one-time manual repo setup
+        # step. Confirmed live: the very first run of this workflow failed with
+        # "could not add label: 'incident' not found" before this step existed.
+        run: gh label create incident --color B60205 --description "Auto-opened by slo-incident-ticketing.yml" --force
+
       - name: check Alertmanager and open one issue per new incident
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
