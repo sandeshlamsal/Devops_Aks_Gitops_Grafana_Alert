@@ -17,8 +17,15 @@ metadata:
     release: kube-prom-stack
 spec:
   service: "user-management-app-api"
+  # namespace here is applied to EVERY generated recording/alerting series (not just
+  # the queries above) — without it, dev/qa/prod all produce identically-labeled
+  # series (same sloth_service/sloth_slo/sloth_id, since the service name is shared
+  # across environments) and would collide in the single cluster-wide Prometheus.
+  # Caught live: kubectl get prometheusrule -o yaml showed no namespace label at all
+  # on slo:error_budget:ratio etc. before this was added (see PR-README.md).
   labels:
     app: user-management-app-api
+    namespace: user-management-app-base-ns
   slos:
     - name: "availability"
       objective: 99.99

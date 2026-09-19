@@ -80,6 +80,7 @@ spec:
   service: "user-management-app-api"
   labels:
     app: user-management-app-api
+    namespace: user-management-app-dev-ns
   slos:
     - name: "availability"
       objective: 99.99
