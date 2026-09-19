@@ -8,6 +8,139 @@ record of those. Newest first. Each entry: what broke, root cause, the fix, the 
 
 ---
 
+## 2026-09-19 — Repeated the 2026-09-12 skip-ci mistake, this time in a commit *body*
+
+**Where:** PR #14's squash-merge commit `fe71692` (the fix for the entry directly
+below this one).
+
+**Symptom:** `fe71692` landed on `main` with **zero** check-runs — not failed, not
+pending, simply never created — so the bump-dev fix it contained went unverified for
+several minutes before being noticed (a `Monitor` polling loop watching for the
+push-triggered run never saw one appear).
+
+**Root cause:** the exact same mistake as the 2026-09-12 entry below
+("A commit describing `[skip ci]` skipped its own CI run"), except this time the
+literal string `[skip ci]` was in the commit **body** (explaining that the bump-dev
+job's own squash commit uses that marker), not the subject. GitHub's skip-ci scan
+covers the whole message, subject and body alike.
+
+**Fix:** no code change — confirmed via
+`git log -1 --format=%B fe71692` (found the string) and
+`gh api repos/OWNER/REPO/commits/fe71692/check-runs` (`total_count: 0`, confirming the
+skip). Recovered by pushing a normal follow-up commit (this one) with a message that
+describes the convention without spelling out the bracketed marker itself.
+
+**Lesson (sharpened from 2026-09-12):** the rule isn't "don't put `[skip ci]` in a
+*commit subject* describing the convention" — it's "don't put it anywhere in the
+*message*, subject or body." When writing about this convention going forward, describe
+it in prose (e.g. "the skip-ci marker") instead of typing the literal brackets.
+
+---
+
+## 2026-09-19 — `bump-dev`'s direct push to `main` rejected by a new ruleset
+
+**Where:** `ci.yml`'s `bump-dev` job, `git push origin HEAD:main` step — first
+push-triggered `CI` run after the repo's "Cant delete main" ruleset picked up a
+`code_coverage` rule (added outside this session, between the 2026-09-12 work and this
+session's "resume"). Three consecutive push-triggered runs failed the same way
+(`35458142848`, `35463063080`, `35463343221`, then `35464878107`) before this was
+caught — every merge to `main` in between had its dev-tag bump silently fail while
+`test`/`build` still passed, so the failure was easy to miss in a quick PR-checks glance.
+
+**Symptom:**
+```
+remote: error: GH013: Repository rule violations found for refs/heads/main.
+remote: - Code coverage checks require merging via API or UI.
+ ! [remote rejected] HEAD -> main (push declined due to repository rule violations)
+```
+
+**Root cause:** `bump-dev` was written (2026-09-12, see below) when a direct
+`git push origin HEAD:main` using the default `GITHUB_TOKEN` was still allowed. The new
+ruleset rejects **any** direct push to `main`, bot or human, regardless of token scope —
+same restriction this session was already hitting manually for its own commits (hence
+the branch+PR+`gh pr merge` workflow adopted mid-session).
+
+**Fix:** `bump-dev` now does the same thing manually-applied commits now do — branch,
+commit, `gh pr create`, then `gh pr merge --squash --delete-branch` (the API path the
+rule explicitly allows). Confirmed the ruleset has no `required_status_checks` rule
+(`gh pr view --json mergeStateStatus` → `CLEAN` immediately after `gh pr create`, no
+wait needed), so the merge can happen in the same job run without polling for checks.
+
+**Commit:** `fe71692` (#14) — whose own merge commit then hit the skip-ci mistake
+documented in the entry above it.
+
+---
+
+## 2026-09-19 — JWT secrets silently seeded empty (`openssl` doesn't exist inside `openbao-0`)
+
+**Where:** OpenBao bootstrap step (`docs/operations-runbook.md` B7), seeding
+`kv/user-management-app/jwt-{dev,qa,prod}` on this session's fresh stand-up.
+
+**Symptom:** no loud error — `bao kv put kv/user-management-app/jwt-dev
+secret="$(openssl rand -hex 32)"` run via `kubectl exec -it openbao-0 -- sh -c '...'`
+printed `sh: openssl: not found` on its own line, immediately followed by what looked
+like a normal-looking `bao kv put` success response (`version: 1`). Easy to miss if you
+only check the command's exit code / final line.
+
+**Root cause:** the `$(openssl rand -hex 32)` subshell was evaluated **inside** the
+remote `openbao-0` container's shell (a minimal image with no `openssl` binary), not on
+the local machine — so it expanded to an empty string, and `bao kv put ... secret=""`
+happily wrote an empty secret. `bao`'s own response gives no hint the value it received
+was empty.
+
+**Fix:** generate the three JWT secrets with `openssl` **locally** (where it exists)
+first, then interpolate the real values into a fresh `kubectl exec` call as literal
+shell arguments (no nested `$(...)` evaluated remotely):
+```bash
+JWT_DEV=$(openssl rand -hex 32); JWT_QA=$(openssl rand -hex 32); JWT_PROD=$(openssl rand -hex 32)
+kubectl exec -it openbao-0 -n openbao -- sh -c "
+  bao kv put kv/user-management-app/jwt-dev  secret='${JWT_DEV}'
+  bao kv put kv/user-management-app/jwt-qa   secret='${JWT_QA}'
+  bao kv put kv/user-management-app/jwt-prod secret='${JWT_PROD}'
+"
+```
+Confirmed fixed via the resulting `version: 2` in each response (overwriting the empty
+`version: 1`).
+
+**Lesson:** when a command that generates a secret runs inside a `kubectl exec` shell,
+check *which* shell actually evaluates any `$(...)` in it — a subshell inside a
+double-quoted `sh -c "..."` argument runs locally (in this fix); a subshell inside a
+single-quoted one, or typed directly at an `-it` prompt, runs remotely. Always read the
+full command output, not just the last line — the `openssl: not found` warning was
+there to see, on a separate line, the whole time.
+
+**Commit:** not a git change (live OpenBao KV write); caught and fixed during this
+session's B7 stand-up step.
+
+---
+
+## 2026-09-19 — `cnpg-operator` was missing a `cert-manager` dependency
+
+**Where:** `clusters/dev/cnpg-operator.yaml` — found by code inspection while
+reviewing PR #9's Barman Cloud plugin addition (`infrastructure/cnpg/barman-cloud-plugin.yaml`),
+before this session's stand-up, not as a live failure.
+
+**Root cause:** the CNPG Barman Cloud plugin (`barmancloud.cnpg.io/v1` `ObjectStore`)
+serves its CNPG-I gRPC endpoint over TLS using a cert-manager-issued certificate, but
+`cnpg-operator`'s Flux `Kustomization` had no `dependsOn` on a `cert-manager`
+Kustomization — because none existed yet; PR #9 added the plugin without adding
+cert-manager as a platform component at all.
+
+**Fix:** added `clusters/dev/cert-manager.yaml` (new Flux `Kustomization`,
+`dependsOn: none`) and `dependsOn: [cert-manager]` on `cnpg-operator`'s. Also added
+`cert-manager` to the pre-Flux RBAC namespace loop (`docs/operations-runbook.md` B3,
+`README.md` §3.6) — missed in the first pass, caught before running the loop for real
+(see the RBAC-loop fix, commit `827991c` / #13).
+
+**Verification:** confirmed on this session's real stand-up — both
+`platform-config-cert-manager` and `platform-config-cnpg-operator` (including the
+`plugin-barman-cloud` pod) reconciled `Ready=True` on the very first attempt, no manual
+intervention needed.
+
+**Commit:** `f86d656` (#12).
+
+---
+
 ## 2026-09-13 — `promote-qa` waited the full 15 minutes even after an early manual merge
 
 **Where:** `promote-qa.yml`'s auto-merge step, run [34734298227].
