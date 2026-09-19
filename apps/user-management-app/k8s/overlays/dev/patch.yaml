@@ -86,8 +86,8 @@ spec:
       description: "Proportion of requests that do not return 5xx"
       sli:
         events:
-          errorQuery: sum(rate(http_request_duration_seconds_count{status=~"5..",namespace="user-management-app-dev-ns"}[{{"{{.window}}"}}]))
-          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-dev-ns"}[{{"{{.window}}"}}]))
+          errorQuery: sum(rate(http_request_duration_seconds_count{status=~"5..",namespace="user-management-app-dev-ns"}[{{.window}}]))
+          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-dev-ns"}[{{.window}}]))
       alerting:
         name: UserManagementAppApiAvailabilityBudgetBurn
         labels:
@@ -106,8 +106,8 @@ spec:
       description: "Proportion of requests served in under 300ms"
       sli:
         events:
-          errorQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-dev-ns"}[{{"{{.window}}"}}])) - sum(rate(http_request_duration_seconds_bucket{le="0.3",namespace="user-management-app-dev-ns"}[{{"{{.window}}"}}]))
-          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-dev-ns"}[{{"{{.window}}"}}]))
+          errorQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-dev-ns"}[{{.window}}])) - sum(rate(http_request_duration_seconds_bucket{le="0.3",namespace="user-management-app-dev-ns"}[{{.window}}]))
+          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-dev-ns"}[{{.window}}]))
       alerting:
         name: UserManagementAppApiLatencyBudgetBurn
         labels:
