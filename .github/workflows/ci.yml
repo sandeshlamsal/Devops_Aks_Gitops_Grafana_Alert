@@ -2,14 +2,21 @@ name: CI
 
 # PRs: validate + test + build (no push) — a fast, safe check before merge.
 # push to main: same, plus push the built api/ui images to ACR tagged dev-<run_number>
-# and main-<sha>, then bump-dev commits that tag straight into the dev overlay using
-# the default GITHUB_TOKEN — no manual tag edits, no PR for dev, no PAT to create.
+# and main-<sha>, then bump-dev commits that tag into the dev overlay using the
+# default GITHUB_TOKEN — no manual tag edits, no PAT to create.
 #
 # (This used to be Flux Image Automation — an in-cluster controller watching ACR and
 # committing the bump itself. That needed its own git-write credential, which is a
 # real GitHub token tied to a real identity either way; a GitHub Actions job gets one
 # for free, scoped to the job's own lifetime, with zero setup. Moved here instead —
 # same job qa/prod's promote-*.yml already do for their own overlay bumps.)
+#
+# bump-dev goes through a branch + PR + squash-merge (via `gh pr merge`, i.e. the API)
+# rather than `git push origin HEAD:main` directly — this repo's "Cant delete main"
+# ruleset added a code_coverage rule that rejects any direct push to main ("Code
+# coverage checks require merging via API or UI"), which silently broke the old
+# direct-push version of this job (see PR-README.md). The squash commit still carries
+# [skip ci] so merging it doesn't trigger another push-triggered CI run.
 on:
   pull_request:
     branches: [main]
@@ -144,6 +151,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - name: bump dev overlay to dev-${{ github.run_number }}
@@ -154,13 +162,23 @@ jobs:
           yq -i '(.images[] | select(.name == "user-management-app-ui")  | .newTag) = strenv(TAG)' apps/user-management-app/k8s/overlays/dev/kustomization.yaml
         env:
           TAG: dev-${{ github.run_number }}
-      - name: commit + push (direct to main — dev needs no PR, same as before)
+      - name: commit + open PR + squash-merge (branch protection blocks a direct push)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git diff --quiet -- apps/user-management-app/k8s/overlays/dev/kustomization.yaml && { echo "no change, skipping"; exit 0; }
+          BRANCH="bump-dev-${{ github.run_number }}"
+          git checkout -b "$BRANCH"
           git add apps/user-management-app/k8s/overlays/dev/kustomization.yaml
-          # [skip ci] is a GitHub-native convention — this commit's own push does NOT
-          # trigger another CI run, so there's no bump-dev -> push -> bump-dev loop.
-          git commit -m "bump dev to dev-${{ github.run_number }} [skip ci]"
-          git push origin HEAD:main
+          git commit -m "bump dev to dev-${{ github.run_number }}"
+          git push origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" \
+            --title "bump dev to dev-${{ github.run_number }}" \
+            --body "Automated: points the dev overlay at the image just built and pushed by this CI run."
+          # [skip ci] on the squash commit is a GitHub-native convention — this
+          # merge's own push to main does NOT trigger another CI run, so there's no
+          # bump-dev -> push -> bump-dev loop.
+          gh pr merge "$BRANCH" --squash --delete-branch \
+            --subject "bump dev to dev-${{ github.run_number }} [skip ci]"
