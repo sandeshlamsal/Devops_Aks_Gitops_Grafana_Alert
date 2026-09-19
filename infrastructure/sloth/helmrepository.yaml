@@ -1,0 +1,10 @@
+# Chart source for Sloth — the SLO operator. See SRE/02-implementation-sloth.md for
+# why this exists instead of hand-written PromQL recording/alerting rules.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: sloth
+  namespace: monitoring
+spec:
+  interval: 1h
+  url: https://slok.github.io/sloth

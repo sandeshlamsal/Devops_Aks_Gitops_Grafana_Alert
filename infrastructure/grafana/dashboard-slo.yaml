@@ -1,0 +1,23 @@
+# The SLO error-budget dashboard (SRE/06-dashboard.md). Model lives in
+# json/user-management-app-slo.json, bundled into the grafana-dashboards ConfigMap by
+# kustomization.yaml — same shape as dashboard.yaml, filed into the same folder.
+#
+# The queries in the JSON model use Sloth-generated metric names (slo:error_budget:ratio,
+# slo:sli_error:ratio_rate<window>) with labels sloth_service/sloth_slo — confirm these
+# exact label names against `kubectl get prometheusrule -n monitoring -o yaml` on first
+# real deploy (Sloth's generated-rule label schema, not something hand-verified here yet
+# — see SRE/README.md's "not yet applied to a live cluster" note).
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: user-management-app-slo
+  namespace: monitoring
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: "grafana"
+  folderRef: custom-application-dashboards
+  resyncPeriod: 1m
+  configMapRef:
+    name: grafana-dashboards
+    key: user-management-app-slo.json

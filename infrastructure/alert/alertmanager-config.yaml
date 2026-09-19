@@ -13,6 +13,23 @@ spec:
     groupWait: 30s
     groupInterval: 5m
     repeatInterval: 1h
+    routes:
+      # Sloth's burn-rate alerts (SRE/03-alerting-and-burn-rate.md) — same receiver,
+      # different repeat cadence: a page-severity alert should nag every 15m while
+      # it's still open, a ticket-severity one is fine reminding every few hours.
+      - receiver: "email"
+        matchers:
+          - name: severity
+            value: page
+            matchType: "="
+        groupWait: 10s
+        repeatInterval: 15m
+      - receiver: "email"
+        matchers:
+          - name: severity
+            value: ticket
+            matchType: "="
+        repeatInterval: 4h
   receivers:
     - name: "email"
       emailConfigs:

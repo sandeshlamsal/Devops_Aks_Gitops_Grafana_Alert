@@ -13,10 +13,12 @@ resources:
   - grafana.yaml
   - folder.yaml
   - dashboard.yaml
+  - dashboard-slo.yaml
 configMapGenerator:
   - name: grafana-dashboards
     namespace: monitoring
     files:
       - json/user-management-app.json
+      - json/user-management-app-slo.json
 generatorOptions:
   disableNameSuffixHash: true

@@ -1,0 +1,62 @@
+# The SLOs from SRE/01-slis-and-slos.md, as Sloth's PrometheusServiceLevel CR — Sloth's
+# controller (infrastructure/sloth/) turns this into the actual PrometheusRule (every
+# multi-window recording rule, the page/ticket burn-rate alerts). See
+# SRE/02-implementation-sloth.md for the full walkthrough.
+#
+# namespace in both queries below is the base placeholder — each overlay's patch.yaml
+# overrides it to that environment's real namespace, same pattern as objectstore.yaml's
+# destinationPath. objective (99.99, SRE/01's base target) is the same in every
+# environment and does NOT need patching — only qa/dev's PrometheusServiceLevel comes
+# through unenforced (see SRE/04-deployment-gating.md: only prod's alert output is
+# ever checked by promote-prod.yml).
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: user-management-app-api
+  labels:
+    release: kube-prom-stack
+spec:
+  service: "user-management-app-api"
+  labels:
+    app: user-management-app-api
+  slos:
+    - name: "availability"
+      objective: 99.99
+      description: "Proportion of requests that do not return 5xx"
+      sli:
+        events:
+          errorQuery: sum(rate(http_request_duration_seconds_count{status=~"5..",namespace="user-management-app-base-ns"}[{{"{{.window}}"}}]))
+          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-base-ns"}[{{"{{.window}}"}}]))
+      alerting:
+        name: UserManagementAppApiAvailabilityBudgetBurn
+        labels:
+          service: user-management-app-api
+          slo: availability
+        annotations:
+          summary: "user-management-app-api is burning its availability error budget too fast"
+        pageAlert:
+          labels:
+            severity: page
+        ticketAlert:
+          labels:
+            severity: ticket
+    - name: "latency"
+      objective: 95
+      description: "Proportion of requests served in under 300ms — see Step 0 in SRE/01-slis-and-slos.md for the histogram bucket this depends on"
+      sli:
+        events:
+          errorQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-base-ns"}[{{"{{.window}}"}}])) - sum(rate(http_request_duration_seconds_bucket{le="0.3",namespace="user-management-app-base-ns"}[{{"{{.window}}"}}]))
+          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-base-ns"}[{{"{{.window}}"}}]))
+      alerting:
+        name: UserManagementAppApiLatencyBudgetBurn
+        labels:
+          service: user-management-app-api
+          slo: latency
+        annotations:
+          summary: "user-management-app-api is burning its latency error budget too fast"
+        pageAlert:
+          labels:
+            severity: page
+        ticketAlert:
+          labels:
+            severity: ticket
