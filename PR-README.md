@@ -8,6 +8,68 @@ record of those. Newest first. Each entry: what broke, root cause, the fix, the 
 
 ---
 
+## 2026-09-19 — SLO stand-up: three real bugs found getting the first live burn-rate alert to fire
+
+**Where:** `apps/user-management-app/k8s/base/slo.yaml` + all 3 overlay `patch.yaml`s +
+`infrastructure/grafana/json/user-management-app-slo.json` — the SLO/error-budget
+implementation from PR #11 had never been applied to a live cluster before this
+session's dev stand-up. All three were caught in sequence while getting dev's
+`PrometheusServiceLevel` to actually generate rules and render in Grafana.
+
+**Bug 1 — `{{.window}}` was double-escaped.** Every `errorQuery`/`totalQuery` had
+`{{"{{.window}}"}}` instead of `{{.window}}`. Sloth parses these as Go templates before
+treating the result as PromQL; the stray quote/brace broke every query with
+`parse error: unexpected character in duration expression: '{'`. `sloth-84bdc875bc-jsvn2`'s
+logs showed both SLOs stuck retrying forever; `kubectl get prometheusservicelevel`
+showed `GEN OK: false`, `READY SLOS: 0`. **Fix:** `179d767` (#17).
+
+**Bug 2 — no `namespace` label on any generated series.** `errorQuery`/`totalQuery` use
+a bare `sum(rate(...))`, stripping every label from the result — so
+`slo:error_budget:ratio`, `slo:sli_error:ratio_rate5m`, etc. carried only
+`sloth_service`/`sloth_slo`/`sloth_id` (identical across dev/qa/prod, since all three
+share the same service name). Once qa/prod are ever armed, their rule groups would
+silently collide with dev's in the single cluster-wide Prometheus. **Fix:** added
+`spec.labels.namespace` (a Sloth CR field applied to every generated series, not just
+the query text) per overlay. `121182b` (#19).
+
+**Bug 3 — dashboard's "error budget remaining" panels queried a constant.**
+`slo:error_budget:ratio` is `vector(1 - objective)` — static, never moves. Three panels
+(both remaining-budget gauges, the burn-down timeseries) queried it directly, so they'd
+show the same frozen number regardless of real error traffic. The metric that actually
+depletes is `slo:period_error_budget_remaining:ratio` (`1 - period burn rate`).
+**Fix:** `f3db87a` (#21).
+
+**End-to-end verification (after all three fixes):** logged in as `admin`, generated a
+mixed burst of real traffic against dev's API (`~2/3` healthy `/api/healthz` calls,
+`~1/3` a real 500 via a malformed admin `PUT /api/users/:id` — `id` set to a non-numeric
+string, triggering a genuine Postgres type error caught by the route's existing
+try/catch). Confirmed in Prometheus:
+`slo:sli_error:ratio_rate5m{sloth_slo="availability"}` = `0.284` (28.4% error rate, vs.
+a 99.99% objective), and `ALERTS{alertname="UserManagementAppApiAvailabilityBudgetBurn"}`
+firing at both `severity="page"` and `severity="ticket"`, correctly labeled with
+`namespace="user-management-app-dev-ns"`, present in Alertmanager
+(`/api/v2/alerts`). The full pipeline — SLI → Sloth-generated burn-rate rule →
+Prometheus alert → Alertmanager routing — is live and correct.
+
+**Known follow-up, not yet fixed:** `slo:sli_error:ratio_rate30d` (and everything
+downstream of it — `slo:period_burn_rate:ratio`, `slo:period_error_budget_remaining:ratio`)
+currently reports rule health `err`: `vector contains metrics with the same labelset
+after applying rule labels`. Self-inflicted by fixing bug 2 live: the *old*
+(pre-fix, no-`namespace`) and *new* (post-fix, `namespace` set) samples of
+`slo:sli_error:ratio_rate5m` both still exist inside the 30-day range this rule queries,
+and Sloth's static `spec.labels` forces both onto the identical final label set,
+colliding. Prometheus's admin API (`/api/v1/admin/tsdb/delete_series`) is disabled by
+default on this cluster (confirmed: `500`) — correctly so, not something to flip on for
+a demo. This will not recur on a stand-up where the namespace label is correct from the
+very first sample; on *this* cluster it self-resolves once the pre-fix samples age past
+30 days old. Not blocking: the short-window burn-rate panels (5m/1h/6h) and the firing
+alerts — the actually load-bearing parts of "is the error budget being enforced" — are
+unaffected and already verified live above.
+
+**Commits:** `179d767` (#17), `121182b` (#19), `f3db87a` (#21).
+
+---
+
 ## 2026-09-19 — Repeated the 2026-09-12 skip-ci mistake, this time in a commit *body*
 
 **Where:** PR #14's squash-merge commit `fe71692` (the fix for the entry directly
