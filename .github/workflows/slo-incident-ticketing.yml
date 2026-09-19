@@ -1,0 +1,107 @@
+name: SLO incident ticketing
+
+# Polls Alertmanager for any firing severity=page burn-rate alert and opens exactly
+# one GitHub Issue per ongoing incident (one per distinct alertname+namespace pair,
+# so dev/qa/prod each get their own ticket instead of sharing one). Never auto-closes
+# an issue — deciding an incident is actually over is a human judgment call, not
+# something a metric dropping below a threshold should make on its own. See
+# SRE/05-incident-management.md for the full design writeup.
+#
+# No long-running infra: same pattern as promote-*.yml already uses to reach the
+# cluster (OIDC login, azure/aks-set-context, kubectl), just port-forwarding to
+# Alertmanager instead of patching a Kustomization.
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # matches SRE/03's shortest alert window (5m)
+  workflow_dispatch: {}      # manual trigger, for testing this workflow itself
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+jobs:
+  check-and-ticket:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+      - uses: azure/setup-kubectl@v4
+
+      - name: check Alertmanager and open one issue per new incident
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          kubectl -n monitoring port-forward svc/kube-prom-stack-kube-prome-alertmanager 9093:9093 &
+          PF_PID=$!
+          for i in $(seq 1 15); do curl -sf http://localhost:9093/-/ready >/dev/null 2>&1 && break; sleep 1; done
+
+          # one incident per distinct (alertname, namespace) pair currently firing at
+          # severity=page — not one flat count, so dev/qa/prod (or different alerts)
+          # each get their own ticket instead of colliding into a single issue.
+          INCIDENTS=$(curl -s http://localhost:9093/api/v2/alerts \
+            | jq -c '[.[] | select(.labels.severity=="page" and .status.state=="active")
+                       | {alertname: .labels.alertname, namespace: (.labels.namespace // "unknown"),
+                          slo: (.labels.slo // .labels.sloth_slo // "unknown"),
+                          summary: (.annotations.summary // "")}]
+                     | unique')
+          kill $PF_PID 2>/dev/null || true
+
+          COUNT=$(echo "$INCIDENTS" | jq 'length')
+          [ "$COUNT" -eq 0 ] && { echo "nothing firing at severity=page"; exit 0; }
+          echo "found $COUNT distinct firing incident(s)"
+
+          echo "$INCIDENTS" | jq -c '.[]' | while read -r incident; do
+            ALERTNAME=$(echo "$incident" | jq -r '.alertname')
+            NAMESPACE=$(echo "$incident" | jq -r '.namespace')
+            SLO=$(echo "$incident" | jq -r '.slo')
+            SUMMARY=$(echo "$incident" | jq -r '.summary')
+            KEY="${ALERTNAME}:${NAMESPACE}"
+
+            # idempotency: search open incident issues for this exact key in the body
+            # (a hidden marker) rather than opening a second ticket for an incident
+            # that's already being tracked.
+            EXISTING=$(gh issue list --label incident --state open --json number,body \
+              --jq ".[] | select(.body | contains(\"incident-key: ${KEY}\")) | .number" | head -1)
+
+            if [ -n "$EXISTING" ]; then
+              echo "incident $KEY already tracked as issue #$EXISTING, not creating a duplicate"
+              continue
+            fi
+
+            BODY_FILE=$(mktemp)
+            {
+              echo "<!-- incident-key: ${KEY} -->"
+              echo "**Detected:** $(date -u +%Y-%m-%dT%H:%M:%SZ) — \`${ALERTNAME}\` (severity=page, slo=${SLO}) fired in \`${NAMESPACE}\`."
+              echo ""
+              echo "**Alert summary:** ${SUMMARY}"
+              echo ""
+              echo "See [SRE/03-alerting-and-burn-rate.md](${REPO_URL}/blob/main/SRE/03-alerting-and-burn-rate.md)"
+              echo "for what this alert means, and"
+              echo "[SRE/05-incident-management.md](${REPO_URL}/blob/main/SRE/05-incident-management.md) for how"
+              echo "this issue was opened."
+              echo ""
+              echo "This issue is auto-opened by \`slo-incident-ticketing.yml\` and never auto-closed —"
+              echo "close it yourself once the incident is actually resolved."
+              echo ""
+              echo "---"
+              echo ""
+              cat SRE/postmortem-template.md
+            } > "$BODY_FILE"
+
+            gh issue create \
+              --title "[INCIDENT] ${ALERTNAME} firing (severity=page) in ${NAMESPACE}" \
+              --label incident \
+              --body-file "$BODY_FILE"
+            rm -f "$BODY_FILE"
+          done
