@@ -36,6 +36,7 @@ Prometheus and Grafana. (The Azure portal's *Monitoring → Dashboards with Graf
 | **Scope & roadmap (multi-cloud / EKS)** | [§11](#11-scope--roadmap) |
 | **Tear down to save cost / stand back up** | [§14](#14-tear-down-to-save-cost--and-stand-back-up) |
 | **Operations runbook (full teardown + full stand-up, all 3 envs, one script)** | [`docs/operations-runbook.md`](docs/operations-runbook.md) |
+| **SRE: SLIs/SLOs, error budgets, burn-rate alerting, deployment gating, incidents** | [`SRE/README.md`](SRE/README.md) — design + implementation guide, not yet deployed |
 
 ---
 
