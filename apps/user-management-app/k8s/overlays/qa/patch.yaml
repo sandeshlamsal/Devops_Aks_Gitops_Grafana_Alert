@@ -67,3 +67,55 @@ metadata:
 spec:
   configuration:
     destinationPath: "https://CHANGEME.blob.core.windows.net/postgres-backups-qa"
+---
+# qa's namespace substituted into both SLOs' queries — see dev/patch.yaml's comment;
+# qa's PrometheusServiceLevel is measured but unenforced, same as dev's
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: user-management-app-api
+spec:
+  service: "user-management-app-api"
+  labels:
+    app: user-management-app-api
+  slos:
+    - name: "availability"
+      objective: 99.99
+      description: "Proportion of requests that do not return 5xx"
+      sli:
+        events:
+          errorQuery: sum(rate(http_request_duration_seconds_count{status=~"5..",namespace="user-management-app-qa-ns"}[{{"{{.window}}"}}]))
+          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-qa-ns"}[{{"{{.window}}"}}]))
+      alerting:
+        name: UserManagementAppApiAvailabilityBudgetBurn
+        labels:
+          service: user-management-app-api
+          slo: availability
+        annotations:
+          summary: "user-management-app-api is burning its availability error budget too fast"
+        pageAlert:
+          labels:
+            severity: page
+        ticketAlert:
+          labels:
+            severity: ticket
+    - name: "latency"
+      objective: 95
+      description: "Proportion of requests served in under 300ms"
+      sli:
+        events:
+          errorQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-qa-ns"}[{{"{{.window}}"}}])) - sum(rate(http_request_duration_seconds_bucket{le="0.3",namespace="user-management-app-qa-ns"}[{{"{{.window}}"}}]))
+          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-qa-ns"}[{{"{{.window}}"}}]))
+      alerting:
+        name: UserManagementAppApiLatencyBudgetBurn
+        labels:
+          service: user-management-app-api
+          slo: latency
+        annotations:
+          summary: "user-management-app-api is burning its latency error budget too fast"
+        pageAlert:
+          labels:
+            severity: page
+        ticketAlert:
+          labels:
+            severity: ticket

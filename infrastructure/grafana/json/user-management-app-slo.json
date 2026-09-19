@@ -1,0 +1,133 @@
+{
+  "title": "User Management App SLO",
+  "uid": "user-management-app-slo",
+  "schemaVersion": 39,
+  "tags": ["sre", "slo"],
+  "time": { "from": "now-24h", "to": "now" },
+  "refresh": "1m",
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "label": "Namespace",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheusdatasource" },
+        "query": {
+          "query": "label_values(kube_pod_info{pod=~\"user-management-app-.*\"}, namespace)",
+          "refId": "namespace"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": false,
+        "multi": false,
+        "current": { "text": "user-management-app-prod-ns", "value": "user-management-app-prod-ns" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Availability error budget remaining",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheusdatasource" },
+      "targets": [
+        {
+          "expr": "slo:error_budget:ratio{sloth_service=\"user-management-app-api\", sloth_slo=\"availability\", namespace=\"$namespace\"} * 100",
+          "legendFormat": "availability budget remaining"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 20 },
+              { "color": "green", "value": 50 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Latency error budget remaining",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheusdatasource" },
+      "targets": [
+        {
+          "expr": "slo:error_budget:ratio{sloth_service=\"user-management-app-api\", sloth_slo=\"latency\", namespace=\"$namespace\"} * 100",
+          "legendFormat": "latency budget remaining"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 20 },
+              { "color": "green", "value": 50 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Requests/sec (context for the budget panels)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheusdatasource" },
+      "targets": [
+        {
+          "expr": "sum(rate(http_request_duration_seconds_count{namespace=\"$namespace\"}[5m]))",
+          "legendFormat": "req/s"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 4,
+      "title": "Availability budget burn-down (30d window)",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheusdatasource" },
+      "targets": [
+        {
+          "expr": "1 - slo:error_budget:ratio{sloth_service=\"user-management-app-api\", sloth_slo=\"availability\", namespace=\"$namespace\"}",
+          "legendFormat": "budget consumed"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } }
+    },
+    {
+      "id": 5,
+      "title": "Current burn rate, per alert window (SRE/03)",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheusdatasource" },
+      "targets": [
+        {
+          "expr": "slo:sli_error:ratio_rate5m{sloth_service=\"user-management-app-api\", sloth_slo=\"availability\", namespace=\"$namespace\"}",
+          "legendFormat": "5m"
+        },
+        {
+          "expr": "slo:sli_error:ratio_rate1h{sloth_service=\"user-management-app-api\", sloth_slo=\"availability\", namespace=\"$namespace\"}",
+          "legendFormat": "1h"
+        },
+        {
+          "expr": "slo:sli_error:ratio_rate6h{sloth_service=\"user-management-app-api\", sloth_slo=\"availability\", namespace=\"$namespace\"}",
+          "legendFormat": "6h"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" } }
+    }
+  ]
+}

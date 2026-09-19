@@ -1,0 +1,8 @@
+# Applied by the Flux Kustomization "sloth" (clusters/dev/sloth.yaml), which dependsOn
+# "prometheus" (needs the Prometheus Operator's PrometheusRule CRD registered before
+# Sloth's controller can create any).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - helmrepository.yaml
+  - sloth.yaml

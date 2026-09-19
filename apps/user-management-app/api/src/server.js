@@ -27,6 +27,10 @@ const httpHist = new client.Histogram({
   name: "http_request_duration_seconds",
   help: "HTTP request duration",
   labelNames: ["method", "route", "status"],
+  // 0.3 = the latency SLO threshold (SRE/01-slis-and-slos.md) — without an explicit
+  // bucket boundary here, prom-client's defaults have no le="0.3" to query, and the
+  // latency SLI in SRE/01 is simply not computable.
+  buckets: [0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1, 2.5, 5],
 });
 app.use((req, res, next) => {
   const end = httpHist.startTimer();

@@ -1,0 +1,28 @@
+# Sloth's Kubernetes operator: watches PrometheusServiceLevel CRs (see
+# apps/user-management-app/k8s/base/slo.yaml) and generates a PrometheusRule per one
+# — recording rules for every burn-rate window, plus the page/ticket alerts. Nothing
+# hand-written past the PrometheusServiceLevel spec itself.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: sloth
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: sloth
+      version: ">=0.9.0 <1.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: sloth
+        namespace: monitoring
+  values:
+    commonLabels:
+      # every PrometheusRule Sloth generates carries this label — matches the selector
+      # kube-prometheus-stack's Prometheus already uses for every other PrometheusRule
+      # in this repo (see infrastructure/alert/README.md)
+      release: kube-prom-stack
+    resources:
+      requests: { cpu: 25m, memory: 32Mi }
+      limits: { cpu: 200m, memory: 128Mi }

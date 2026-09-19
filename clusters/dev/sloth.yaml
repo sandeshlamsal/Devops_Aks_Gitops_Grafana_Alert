@@ -1,0 +1,19 @@
+# WHY: applies the Sloth SLO operator — generates PrometheusRule recording/alerting
+# rules from the PrometheusServiceLevel CRs in apps/user-management-app/k8s/base/slo.yaml.
+# dependsOn prometheus (needs the PrometheusRule CRD registered first, same ordering
+# reason as every other operator in this repo).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: sloth
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./infrastructure/sloth
+  prune: true
+  dependsOn:
+    - name: prometheus
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  targetNamespace: monitoring

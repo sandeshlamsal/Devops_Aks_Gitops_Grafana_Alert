@@ -11,3 +11,4 @@ resources:
   - db-reset-cronjob.yaml
   - api.yaml
   - ui.yaml
+  - slo.yaml
