@@ -18,10 +18,15 @@ first-deploy-checklist still to come.
 
 Each step depends on the one before it — you cannot gate a deployment on an error
 budget that doesn't exist yet, and you cannot compute an error budget without an SLI to
-measure first. Read and build in order:
+measure first. Read and build in order. **New to DevOps or SRE? Start at step 0** — it
+explains every concept the later files assume you already know (containers,
+Kubernetes, GitOps, operators/CRDs, CI/CD, Prometheus, PromQL, Grafana, Alertmanager)
+from zero, grounded in this exact repo throughout. If you already know that world,
+skip straight to step 1.
 
 | Step | File | What it adds |
 |---|---|---|
+| 0 | [`00-devops-and-sre-basics.md`](00-devops-and-sre-basics.md) | Everything steps 1–6 assume you already know — containers, Kubernetes, GitOps, operators/CRDs, CI/CD, and the observability stack (Prometheus/PromQL/Grafana/Alertmanager), all explained from zero and grounded in this repo |
 | 1 | [`01-slis-and-slos.md`](01-slis-and-slos.md) | What to measure (SLIs), the target (SLOs), and the error-budget math — concepts + the concrete numbers chosen for this app |
 | 2 | [`02-implementation-sloth.md`](02-implementation-sloth.md) | Turn the SLOs from step 1 into real Prometheus recording rules, using **Sloth** (open-source SLO operator) instead of hand-written PromQL |
 | 3 | [`03-alerting-and-burn-rate.md`](03-alerting-and-burn-rate.md) | Get paged *before* the budget is fully gone — multi-window, multi-burn-rate alerting, routed through the Alertmanager that's already running |

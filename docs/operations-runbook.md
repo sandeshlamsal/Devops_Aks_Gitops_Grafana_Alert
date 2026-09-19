@@ -105,7 +105,9 @@ az k8s-configuration flux create \
   --kustomization name=grafana                  path=./infrastructure/grafana         prune=true dependsOn=\["grafana-operator","secrets"\] \
   --kustomization name=alert                    path=./infrastructure/alert           prune=true dependsOn=\["prometheus","secrets"\] \
   --kustomization name=observability            path=./infrastructure/observability   prune=true dependsOn=\["prometheus","grafana"\] \
-  --kustomization name=cnpg-operator            path=./infrastructure/cnpg            prune=true \
+  --kustomization name=sloth                    path=./infrastructure/sloth           prune=true dependsOn=\["prometheus"\] \
+  --kustomization name=cert-manager             path=./infrastructure/cert-manager    prune=true \
+  --kustomization name=cnpg-operator            path=./infrastructure/cnpg            prune=true dependsOn=\["cert-manager"\] \
   --kustomization name=user-management-app-dev  path=./apps/user-management-app/k8s/overlays/dev  prune=true dependsOn=\["cnpg-operator","secrets"\] \
   --kustomization name=user-management-app-qa   path=./apps/user-management-app/k8s/overlays/qa   prune=true dependsOn=\["cnpg-operator","secrets"\] \
   --kustomization name=user-management-app-prod path=./apps/user-management-app/k8s/overlays/prod prune=true dependsOn=\["cnpg-operator","secrets"\]

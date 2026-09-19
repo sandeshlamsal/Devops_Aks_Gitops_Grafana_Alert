@@ -1,5 +1,10 @@
 # WHY: installs the CloudNativePG operator (+ CRDs) as its own Flux Kustomization so the
-# Cluster CRs in the user-management-app overlays can be applied. dependsOn nothing.
+# Cluster CRs in the user-management-app overlays can be applied. Also applies
+# barman-cloud-plugin.yaml (infrastructure/cnpg/kustomization.yaml) — its CNPG-I gRPC
+# endpoint's TLS cert is issued by cert-manager, so this Kustomization can't reconcile
+# without it already installed — this dependsOn was missing entirely until it was
+# caught by inspection before this Kustomization's first real stand-up (see
+# PR-README.md).
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -10,6 +15,8 @@ spec:
   path: ./infrastructure/cnpg
   prune: true
   wait: true
+  dependsOn:
+    - name: cert-manager
   sourceRef:
     kind: GitRepository
     name: flux-system
