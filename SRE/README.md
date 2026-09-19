@@ -7,12 +7,16 @@ Prometheus/Grafana/Alertmanager stack, the existing `promote-qa`/`promote-prod`
 pipeline). Nothing here introduces a parallel monitoring stack; every step extends
 something already running.
 
-**Status: design + implementation guide, not yet deployed.** Every file below has real,
-copy-pasteable YAML/code, grounded in this app's actual metric names and file
-structure — but none of it has been applied to a live cluster yet (there isn't one
-right now — see the root README's teardown/stand-up story). Treat each file's examples
-the way `infrastructure/observability/README.md` treats its own: correct on paper,
-first-deploy-checklist still to come.
+**Status: steps 0–3, 5, and 6 are live and verified on a real cluster; step 4 remains
+design-only.** Steps 1–3/5/6 have all been applied to a real dev stand-up and
+confirmed working end to end: real error traffic → firing burn-rate alerts in
+Alertmanager → an auto-opened GitHub Issue → real data rendering in the Grafana
+dashboard. Step 4 (`promote-prod.yml`'s error-budget gate) still has real,
+copy-pasteable YAML but hasn't been wired into the actual workflow file yet — treat
+that one file's examples the way `infrastructure/observability/README.md` treats its
+own: correct on paper, not yet applied. See `PR-README.md` for the real bugs found and
+fixed getting this live (a broken Go-template placeholder, a missing label, a
+dashboard panel that queried the wrong metric).
 
 ## Why this order
 
