@@ -8,6 +8,33 @@ record of those. Newest first. Each entry: what broke, root cause, the fix, the 
 
 ---
 
+## 2026-09-19 — `slo-incident-ticketing.yml`'s first real run: missing `incident` label
+
+**Where:** `.github/workflows/slo-incident-ticketing.yml`, first `workflow_dispatch`
+run (35467212397), while `UserManagementAppApiAvailabilityBudgetBurn` (severity=page)
+was genuinely firing in dev.
+
+**Symptom:** `found 1 distinct firing incident(s)` logged correctly, then
+`could not add label: 'incident' not found`, exit 1 — no issue opened despite a real
+incident being live.
+
+**Root cause:** `gh issue create --label incident` fails outright if that label
+doesn't already exist in the repo — it doesn't create it implicitly like some other
+`gh` subcommands do with similar-looking flags.
+
+**Fix:** added an idempotent `gh label create incident --color B60205 --force` step
+before the check, so the workflow is self-healing rather than needing a one-time
+manual repo setup step someone has to remember. `bd0bdff` (#26).
+
+**Verification:** re-ran via `workflow_dispatch` against the same still-firing alert —
+succeeded, opened issue #28 with the correct title, `incident-key` marker
+(`UserManagementAppApiAvailabilityBudgetBurn:user-management-app-dev-ns`), and both
+`SRE/03`/`SRE/05` links resolving correctly.
+
+**Commit:** `bd0bdff` (#26).
+
+---
+
 ## 2026-09-19 — SLO stand-up: three real bugs found getting the first live burn-rate alert to fire
 
 **Where:** `apps/user-management-app/k8s/base/slo.yaml` + all 3 overlay `patch.yaml`s +
