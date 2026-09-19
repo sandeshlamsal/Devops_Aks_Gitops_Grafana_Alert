@@ -105,8 +105,8 @@ spec:
       description: "Proportion of requests that do not return 5xx"
       sli:
         events:
-          errorQuery: sum(rate(http_request_duration_seconds_count{status=~"5..",namespace="$namespace"}[{{"{{.window}}"}}]))
-          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="$namespace"}[{{"{{.window}}"}}]))
+          errorQuery: sum(rate(http_request_duration_seconds_count{status=~"5..",namespace="$namespace"}[{{.window}}]))
+          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="$namespace"}[{{.window}}]))
       alerting:
         name: UserManagementAppApiErrorBudgetBurn
         labels:
@@ -139,8 +139,8 @@ spec:
       # per overlay; only prod's copy of this SLO actually gates anything (step 4)
       sli:
         events:
-          errorQuery: sum(rate(http_request_duration_seconds_count{status=~"5..",namespace="user-management-app-prod-ns"}[{{"{{.window}}"}}]))
-          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-prod-ns"}[{{"{{.window}}"}}]))
+          errorQuery: sum(rate(http_request_duration_seconds_count{status=~"5..",namespace="user-management-app-prod-ns"}[{{.window}}]))
+          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-prod-ns"}[{{.window}}]))
 ```
 
 (qa/dev overlays repeat this with their own namespace in both queries — same

@@ -25,8 +25,8 @@ spec:
       description: "Proportion of requests that do not return 5xx"
       sli:
         events:
-          errorQuery: sum(rate(http_request_duration_seconds_count{status=~"5..",namespace="user-management-app-base-ns"}[{{"{{.window}}"}}]))
-          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-base-ns"}[{{"{{.window}}"}}]))
+          errorQuery: sum(rate(http_request_duration_seconds_count{status=~"5..",namespace="user-management-app-base-ns"}[{{.window}}]))
+          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-base-ns"}[{{.window}}]))
       alerting:
         name: UserManagementAppApiAvailabilityBudgetBurn
         labels:
@@ -45,8 +45,8 @@ spec:
       description: "Proportion of requests served in under 300ms — see Step 0 in SRE/01-slis-and-slos.md for the histogram bucket this depends on"
       sli:
         events:
-          errorQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-base-ns"}[{{"{{.window}}"}}])) - sum(rate(http_request_duration_seconds_bucket{le="0.3",namespace="user-management-app-base-ns"}[{{"{{.window}}"}}]))
-          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-base-ns"}[{{"{{.window}}"}}]))
+          errorQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-base-ns"}[{{.window}}])) - sum(rate(http_request_duration_seconds_bucket{le="0.3",namespace="user-management-app-base-ns"}[{{.window}}]))
+          totalQuery: sum(rate(http_request_duration_seconds_count{namespace="user-management-app-base-ns"}[{{.window}}]))
       alerting:
         name: UserManagementAppApiLatencyBudgetBurn
         labels:
