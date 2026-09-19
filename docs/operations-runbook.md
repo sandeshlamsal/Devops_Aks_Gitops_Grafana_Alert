@@ -75,7 +75,7 @@ az acr build --registry sanaksregistry --image user-management-app-ui:v1  ./apps
 ### B3. RBAC for every namespace, *before* installing Flux ([§3.6](../README.md#36-one-time-rbac-for-the-new-namespaces))
 
 ```bash
-for ns in monitoring openbao external-secrets cnpg-system \
+for ns in monitoring openbao external-secrets cnpg-system cert-manager \
           user-management-app-dev-ns user-management-app-qa-ns user-management-app-prod-ns; do
   kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
   kubectl create serviceaccount flux-applier -n "$ns" --dry-run=client -o yaml | kubectl apply -f -
