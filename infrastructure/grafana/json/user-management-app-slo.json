@@ -33,7 +33,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheusdatasource" },
       "targets": [
         {
-          "expr": "slo:error_budget:ratio{sloth_service=\"user-management-app-api\", sloth_slo=\"availability\", namespace=\"$namespace\"} * 100",
+          "expr": "slo:period_error_budget_remaining:ratio{sloth_service=\"user-management-app-api\", sloth_slo=\"availability\", namespace=\"$namespace\"} * 100",
           "legendFormat": "availability budget remaining"
         }
       ],
@@ -60,7 +60,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheusdatasource" },
       "targets": [
         {
-          "expr": "slo:error_budget:ratio{sloth_service=\"user-management-app-api\", sloth_slo=\"latency\", namespace=\"$namespace\"} * 100",
+          "expr": "slo:period_error_budget_remaining:ratio{sloth_service=\"user-management-app-api\", sloth_slo=\"latency\", namespace=\"$namespace\"} * 100",
           "legendFormat": "latency budget remaining"
         }
       ],
@@ -101,7 +101,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheusdatasource" },
       "targets": [
         {
-          "expr": "1 - slo:error_budget:ratio{sloth_service=\"user-management-app-api\", sloth_slo=\"availability\", namespace=\"$namespace\"}",
+          "expr": "1 - slo:period_error_budget_remaining:ratio{sloth_service=\"user-management-app-api\", sloth_slo=\"availability\", namespace=\"$namespace\"}",
           "legendFormat": "budget consumed"
         }
       ],
