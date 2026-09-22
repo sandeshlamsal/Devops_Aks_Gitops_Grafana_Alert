@@ -11,8 +11,8 @@ name: SLO incident ticketing
 # cluster (OIDC login, azure/aks-set-context, kubectl), just port-forwarding to
 # Alertmanager instead of patching a Kustomization.
 on:
-  schedule:
-    - cron: "*/5 * * * *"   # matches SRE/03's shortest alert window (5m)
+  #schedule:
+    #- cron: "*/5 * * * *"   # matches SRE/03's shortest alert window (5m)
   workflow_dispatch: {}      # manual trigger, for testing this workflow itself
 
 permissions:
